@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../core/app_build_info.dart';
 import '../../../core/update_service.dart';
 import '../../../providers/settings_provider.dart';
+import '../../../widgets/app_toast.dart';
 import '../../../widgets/section_card.dart';
 import '../../../widgets/page_scroll_view.dart';
 import '../../../widgets/update_dialog.dart';
@@ -249,12 +250,7 @@ class _UpdateTileState extends State<_UpdateTile> {
       if (info != null) {
         await UpdateDialog.show(context, info);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('当前已是最新版本'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        AppToast.show(context, '当前已是最新版本');
       }
     } finally {
       if (mounted) setState(() => _checking = false);
