@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
 
 import '../constants/nav_thresholds.dart';
+import '../core/update_service.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/app_toast.dart';
@@ -15,6 +16,7 @@ import '../widgets/glass_surface.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/page_scroll_view.dart';
 import '../widgets/title_bar.dart';
+import '../widgets/update_dialog.dart';
 import 'home_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
@@ -90,6 +92,9 @@ class _MainScaffoldState extends State<MainScaffold> {
   /// PlayerProvider 引用，用于 addListener/removeListener 监听跳过/试听提示。
   PlayerProvider? _playerRef;
 
+  /// 是否已执行过启动更新检查（避免重复）。
+  bool _updateChecked = false;
+
   /// Toast 消息队列：仅用于「同一帧内多条消息防覆盖」（点 A→K 弹出 A 的
   /// 根因）。用户快速切歌时新消息会清空队列 + 立即替换当前显示，避免
   /// 过时提示累积（否则 N 首歌会累积 N×3.2s 才消费完）。
@@ -104,6 +109,15 @@ class _MainScaffoldState extends State<MainScaffold> {
       _playerRef?.removeListener(_onPlayerChanged);
       _playerRef = player;
       _playerRef?.addListener(_onPlayerChanged);
+    }
+    // 启动时检查更新（仅一次，设置开启时）
+    if (!_updateChecked) {
+      _updateChecked = true;
+      final settings = context.read<SettingsProvider>();
+      if (settings.checkUpdateOnStart) {
+        // 延迟一帧，确保 UI 构建完成后再弹窗
+        WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdate());
+      }
     }
   }
 
@@ -146,6 +160,17 @@ class _MainScaffoldState extends State<MainScaffold> {
         _showNextToast();
       });
     });
+  }
+
+  /// 启动时检查更新：静默检查，有更新弹窗，无更新不提示。
+  Future<void> _checkUpdate() async {
+    try {
+      final info = await UpdateService.instance.check();
+      if (!mounted || info == null) return;
+      await UpdateDialog.show(context, info);
+    } catch (_) {
+      // 静默失败，不影响启动
+    }
   }
 
   /// 监听 PlayerProvider 变化：跳过/试听提示统一处理。

@@ -94,6 +94,17 @@ class AboutSection extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             const _UpdateButton(),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('启动时检查更新'),
+              subtitle: const Text('开启后每次启动自动检查新版本'),
+              value: context.select<SettingsProvider, bool>(
+                (s) => s.checkUpdateOnStart,
+              ),
+              onChanged: (v) =>
+                  context.read<SettingsProvider>().setCheckUpdateOnStart(v),
+            ),
           ],
         ),
         const SizedBox(height: 8),
