@@ -86,23 +86,11 @@ class AboutSection extends StatelessWidget {
           icon: Icons.system_update_rounded,
           title: '更新',
           children: [
-            Text(
-              '检查是否有新版本可用。',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const _UpdateButton(),
-            const SizedBox(height: 4),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('启动时检查更新'),
-              subtitle: const Text('开启后每次启动自动检查新版本'),
-              value: context.select<SettingsProvider, bool>(
+            _UpdateTile(
+              checkUpdateOnStart: context.select<SettingsProvider, bool>(
                 (s) => s.checkUpdateOnStart,
               ),
-              onChanged: (v) =>
+              onToggleAutoCheck: (v) =>
                   context.read<SettingsProvider>().setCheckUpdateOnStart(v),
             ),
           ],
@@ -233,15 +221,23 @@ class _LogEntryTile extends StatelessWidget {
   }
 }
 
-/// 检查更新按钮：调用 GitHub API 检测新版本，有更新弹窗展示，无更新提示。
-class _UpdateButton extends StatefulWidget {
-  const _UpdateButton();
+/// 更新栏目：手动检查按钮 + 启动时自动检查开关。
+///
+/// 整合为一个连贯的列表项，避免按钮和开关分离显得松散。
+class _UpdateTile extends StatefulWidget {
+  final bool checkUpdateOnStart;
+  final ValueChanged<bool> onToggleAutoCheck;
+
+  const _UpdateTile({
+    required this.checkUpdateOnStart,
+    required this.onToggleAutoCheck,
+  });
 
   @override
-  State<_UpdateButton> createState() => _UpdateButtonState();
+  State<_UpdateTile> createState() => _UpdateTileState();
 }
 
-class _UpdateButtonState extends State<_UpdateButton> {
+class _UpdateTileState extends State<_UpdateTile> {
   bool _checking = false;
 
   Future<void> _check() async {
@@ -267,16 +263,49 @@ class _UpdateButtonState extends State<_UpdateButton> {
 
   @override
   Widget build(BuildContext context) {
-    return FilledButton.tonalIcon(
-      onPressed: _checking ? null : _check,
-      icon: _checking
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.refresh_rounded, size: 18),
-      label: Text(_checking ? '检查中...' : '检查更新'),
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Column(
+      children: [
+        // 手动检查
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.system_update_rounded, color: cs.onSurfaceVariant),
+          title: const Text('检查更新'),
+          subtitle: Text(
+            _checking ? '正在检查...' : '手动检查是否有新版本',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          trailing: _checking
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  Icons.chevron_right_rounded,
+                  color: cs.onSurfaceVariant,
+                ),
+          onTap: _checking ? null : _check,
+        ),
+        const Divider(height: 1),
+        // 启动时自动检查
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('启动时自动检查'),
+          subtitle: Text(
+            '开启后每次启动自动检查新版本',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          value: widget.checkUpdateOnStart,
+          onChanged: widget.onToggleAutoCheck,
+        ),
+      ],
     );
   }
 }
