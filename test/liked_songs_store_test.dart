@@ -19,7 +19,11 @@ void main() {
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
     PathProviderPlatform.instance = MockPathProviderPlatform();
-    DatabaseHelper.init();
+    DatabaseHelper.initForTest();
+  });
+
+  tearDownAll(() async {
+    await DatabaseHelper.resetForTest();
   });
 
   setUp(() async {

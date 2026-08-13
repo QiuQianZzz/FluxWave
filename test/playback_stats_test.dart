@@ -21,8 +21,12 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
     // 模拟 path_provider
     PathProviderPlatform.instance = MockPathProviderPlatform();
-    // 数据库 FFI 初始化（内部有幂等 guard，重复调用不会重复设置 factory）
-    DatabaseHelper.init();
+    // 内存数据库初始化
+    DatabaseHelper.initForTest();
+  });
+
+  tearDownAll(() async {
+    await DatabaseHelper.resetForTest();
   });
 
   setUp(() async {

@@ -15,6 +15,9 @@ class DatabaseHelper {
   static Future<Database>? _initFuture;
   static bool _factoryInitialized = false;
 
+  /// 测试用：非 null 时使用内存数据库。
+  static Database? _testDatabase;
+
   DatabaseHelper._();
 
   static DatabaseHelper get instance {
@@ -32,7 +35,30 @@ class DatabaseHelper {
     _factoryInitialized = true;
   }
 
+  /// 配置测试用内存数据库。每个测试文件调用一次，互不干扰。
+  static Future<void> initForTest() async {
+    init();
+    _testDatabase = await databaseFactoryFfi.openDatabase(
+      inMemoryDatabasePath,
+      options: OpenDatabaseOptions(
+        version: 4,
+        onCreate: instance._onCreate,
+        onUpgrade: instance._onUpgrade,
+      ),
+    );
+  }
+
+  /// 重置测试状态（测试 tearDown 调用）。
+  static Future<void> resetForTest() async {
+    await _testDatabase?.close();
+    _testDatabase = null;
+    _database = null;
+    _initFuture = null;
+  }
+
   Future<Database> get database async {
+    // 测试模式：直接返回内存数据库
+    if (_testDatabase != null) return _testDatabase!;
     if (_database != null) return _database!;
     // 防止并发初始化：多个 await database 若同时进入，_initFuture 保证只开一次。
     _initFuture ??= _initDatabase();

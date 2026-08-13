@@ -45,7 +45,7 @@ jobs:
         run: flutter analyze
 
       - name: Test
-        run: flutter test --concurrency=1
+        run: flutter test
 
       - name: Upload test reports
         if: always()
