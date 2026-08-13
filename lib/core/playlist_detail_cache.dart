@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,9 +18,9 @@ import 'logging/app_log.dart';
 /// 写入单张的完整曲目（不分页截断）：首进网络拉到的明细就是权威底稿，缓存它
 /// 才能保证二次进入整张秒显；单张 JSON 约 150~300KB，可控。
 ///
-/// LRU 淘汰按「最近一次成功刷新」即文件的 mtime（write 成功才更新）：
-/// 磁盘只保留最近 [_maxFiles] 张，超限删最旧。读命中不写盘（不加 IO），
-/// 毫秒级重开同一张详情不担心被挤出。
+/// LRU 淘汰用内存 [LinkedHashMap] 维护写入顺序：首次使用时从磁盘按 mtime
+/// 初始化，之后写入/驱逐都在内存操作，不依赖文件系统时间精度。
+/// 读命中不写盘（不加 IO），毫秒级重开同一张详情不担心被挤出。
 ///
 /// 所有异常静默：读失败/写失败/清理失败都不抛到调用方，页面照常降级为网络路径。
 /// 测试可用 [PlaylistDetailCache.count] 观察落盘数量。
@@ -28,6 +29,11 @@ class PlaylistDetailCache {
   static const int maxFiles = 10;
 
   final Directory? directory;
+
+  /// 写入顺序表：key = 文件全路径，首次 [_ensureLoaded] 时按 mtime 排序填入。
+  final LinkedHashMap<String, File> _order = LinkedHashMap();
+  bool _loaded = false;
+
   PlaylistDetailCache({this.directory});
 
   /// 默认根目录：`<appSupport>/playlist_detail_cache`。
@@ -47,6 +53,22 @@ class PlaylistDetailCache {
   /// 文件名安全化：source 只保留字母数字下划线（防非预期字符进路径）。
   static String _sanitize(String s) =>
       s.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+
+  /// 首次使用时从磁盘加载现有文件到 [_order]（按 mtime 升序）。
+  /// 之后写入直接追加到末尾，不再读 mtime。
+  Future<void> _ensureLoaded(Directory root) async {
+    if (_loaded) return;
+    _loaded = true;
+    final files = await _jsonFiles(root);
+    final withMtime = <(File, DateTime)>[];
+    for (final f in files) {
+      withMtime.add((f, await f.lastModified()));
+    }
+    withMtime.sort((a, b) => a.$2.compareTo(b.$2));
+    for (final (f, _) in withMtime) {
+      _order[f.path] = f;
+    }
+  }
 
   /// 读取某歌单详情缓存；不存在/损坏/解析失败返回 null（不进 catch 抛错）。
   ///
@@ -97,6 +119,7 @@ class PlaylistDetailCache {
   Future<void> write(int playlistId, Playlist meta, List<Song> tracks) async {
     try {
       final root = await _root();
+      await _ensureLoaded(root);
       final payload = jsonEncode({
         'meta': meta.toJson(),
         'tracks': [for (final s in tracks) s.toJson()],
@@ -105,7 +128,10 @@ class PlaylistDetailCache {
       final tmp = File('${f.path}.tmp');
       await tmp.writeAsString(payload, flush: true);
       await tmp.rename(f.path);
-      await _prune(root);
+      // 写入成功：移到顺序表末尾（最新）
+      _order.remove(f.path);
+      _order[f.path] = f;
+      await _prune();
     } catch (e, st) {
       AppLog.warn(
         '歌单详情缓存写入失败 id=$playlistId',
@@ -116,19 +142,17 @@ class PlaylistDetailCache {
     }
   }
 
-  /// LRU：按 lastModified 升序，删掉超过 [maxFiles] 的最久文件。
+  /// LRU：从顺序表头部删掉超过 [maxFiles] 的最旧条目。
   ///
-  /// 全程异步（[Directory.list]/[File.lastModified]/[File.delete]），不阻塞
-  /// UI isolate：避免 sync 枚举目录或 sync 取 mtime 卡主线程。
-  Future<void> _prune(Directory root) async {
+  /// 驱逐顺序由 [_order]（LinkedHashMap 插入序）决定，不依赖文件系统 mtime。
+  Future<void> _prune() async {
     try {
-      final files = await _jsonFiles(root);
-      final withMtime = <(File, DateTime)>[
-        for (final f in files) (f, await f.lastModified()),
-      ]..sort((a, b) => a.$2.compareTo(b.$2));
-      while (withMtime.length > maxFiles) {
-        final victim = withMtime.removeAt(0).$1;
-        await victim.delete();
+      while (_order.length > maxFiles) {
+        final victim = _order.entries.first;
+        _order.remove(victim.key);
+        try {
+          await victim.value.delete();
+        } catch (_) {}
       }
     } catch (e, st) {
       AppLog.warn('歌单详情缓存清理失败', tag: 'playlist-detail', error: e, stack: st);
@@ -160,6 +184,8 @@ class PlaylistDetailCache {
   Future<void> clearAll() async {
     try {
       final root = await _root();
+      _order.clear();
+      _loaded = false;
       for (final f in await _jsonFiles(root)) {
         await f.delete();
       }

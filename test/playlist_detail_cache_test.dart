@@ -31,7 +31,7 @@ void main() {
       try {
         tempDir.deleteSync(recursive: true);
       } catch (_) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
       }
     }
   });
@@ -91,19 +91,25 @@ void main() {
 
   test('LRU：超过 maxFiles 时驱逐最旧的歌单文件', () async {
     final cache = PlaylistDetailCache(directory: tempDir);
-    for (var i = 1; i <= PlaylistDetailCache.maxFiles + 2; i++) {
+    final total = PlaylistDetailCache.maxFiles + 2;
+    for (var i = 1; i <= total; i++) {
       await cache.write(i, _playlist(i, '歌单$i'), _tracks(i));
-      // 每个文件保持独立 mtime 以便 LRU 稳定判断
-      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
+
+    // 不变量 1：总数被裁剪到上限
     expect(
       await cache.count(),
       PlaylistDetailCache.maxFiles,
-      reason: '超出上限应驱逐最旧到 10 张',
+      reason: '超出上限应驱逐到 maxFiles 张',
     );
 
-    // 最旧的两个 id 已被逐出；仍存在的保留（maxFiles 最新的）
+    // 不变量 2：最新的几张一定在（最后写入的 maxFiles 张）
+    for (var i = total - PlaylistDetailCache.maxFiles + 1; i <= total; i++) {
+      expect(await cache.read(i), isNotNull, reason: '较新的歌单 $i 应保留');
+    }
+
+    // 不变量 3：最旧的两张一定被驱逐（LinkedHashMap 插入序，确定性驱逐）
     expect(await cache.read(1), isNull, reason: '最旧的歌单 1 应被驱逐');
-    expect(await cache.read(PlaylistDetailCache.maxFiles + 2), isNotNull);
+    expect(await cache.read(2), isNull, reason: '次旧的歌单 2 应被驱逐');
   });
 }
