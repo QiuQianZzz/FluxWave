@@ -11,6 +11,9 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/audio_cache/audio_cache.dart';
+import 'core/audio_cache/cover_cache.dart';
+import 'core/audio_cache/lyrics_cache.dart';
+import 'core/cache_migration.dart';
 import 'core/cover_color_extractor.dart';
 import 'core/logging/app_crash.dart';
 import 'core/logging/app_log.dart';
@@ -47,7 +50,11 @@ void main() {
       // 挂 Flutter/引擎未处理错误钩子（保留框架默认行为，仅追加落盘）。
       AppCrash.installHandlers();
       // 音频磁盘缓存：本地代理 + store，best-effort，失败静默走 CDN。
+      // 先执行缓存目录结构迁移（audio_cache/ → cache/<songKey>/），再初始化各缓存。
+      await CacheMigration.migrate();
       await AudioCache.init();
+      await CoverCache.init();
+      await LyricsCache.init();
 
       // 播放记录数据库初始化（Windows 需要 FFI）
       DatabaseHelper.init();

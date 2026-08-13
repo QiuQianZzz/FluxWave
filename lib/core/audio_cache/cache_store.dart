@@ -5,16 +5,19 @@ import 'dart:io';
 import 'package:meta/meta.dart';
 
 import '../app_dirs.dart';
+import 'cache_index.dart';
 
 /// 音频磁盘缓存：本地代理的数据落盘层。
 ///
 /// 设计：
-/// - **每首歌一个文件** `<key>.bin`，按**字节偏移**写入（`RandomAccessFile`），
-///   seek 到哪段就补哪段，不做预取/不做整曲搬运。
+/// - **每首歌一个目录** `cache/<songKey>/`，音频文件 `audio.bin`，按**字节偏移**
+///   写入（`RandomAccessFile`），seek 到哪段就补哪段，不做预取/不做整曲搬运。
 /// - **范围位图**：内存 + 持久化记录已缓存区间（合并后的 `[start,end)` 列表），
 ///   用于「命中读本地 / 未命中回源」判定，重启后已缓存段仍可离线播。
 /// - **总量上限**：默认 [defaultMaxBytes]（3GB），运行时经 [setMaxBytes] 调整，
-///   按 `lastAccess` LRU 驱逐最久未触碰的整首文件。初始化与写入后兜底清理。
+///   按 `lastAccess` LRU 驱逐最久未触碰的整首目录。初始化与写入后兜底清理。
+/// - **目录结构**：`cache/<songKey>/audio.bin`，旧版 `audio_cache/` 由
+///   [CacheMigration] 迁移。
 /// - **CDN 直链仅会话内存**：网易直链有时效，不持久化；[remember] 每次播放时
 ///   重新登记。**直链生命周期随「会话」不随「磁盘」**：驱逐/清理/内容失效都
 ///   只删磁盘字节，保留直链——若被清的歌再次续读/seek，代理仍能凭直链回源
@@ -55,7 +58,7 @@ class AudioCacheStore {
 
   static const String _indexFile = 'index.json';
 
-  Directory? _root; // .../audio_cache
+  Directory? _root; // .../cache
   bool _initAttempted = false;
   final Map<String, CacheEntry> _entries = {};
   // 会话内有效的 CDN 直链：key -> cdnUrl（不持久化）。
@@ -86,7 +89,9 @@ class AudioCacheStore {
   /// 是否已初始化尝试过（供测试）。
   bool get initAttempted => _initAttempted;
 
-  /// 初始化缓存目录（`<appSupport>/audio_cache`）。幂等；失败静默禁用。
+  /// 初始化缓存目录（`<appSupport>/cache`）。幂等；失败静默禁用。
+  ///
+  /// 启动前需先调用 [CacheMigration.migrate] 完成目录结构迁移。
   static Future<void> init({String? directory}) async {
     final store = instance;
     if (store._initAttempted) return;
@@ -94,10 +99,11 @@ class AudioCacheStore {
     try {
       final root = directory != null
           ? Directory(directory)
-          : await appSupportDir('audio_cache');
+          : await appSupportDir('cache');
       await root.create(recursive: true);
       store._root = root;
       await store._loadIndex();
+      await store._scanExisting();
       store._prune();
     } catch (_) {
       store._root = null;
@@ -182,8 +188,16 @@ class AudioCacheStore {
   CacheEntry? entry(String key) => _entries[key];
 
   /// 已缓存文件路径（不存在也返回路径）。
-  String filePath(String key) =>
-      '${_root!.path}${Platform.pathSeparator}$key.bin';
+  ///
+  /// 格式：`cache/<songKey>/<level>_<type>.bin`
+  /// 音频 key 格式：`<source>_<songId>_<level>_<type>`
+  String filePath(String key) {
+    final sk = CacheIndex.songKeyFromAudioKey(key) ?? key;
+    // 从 audioKey 提取音质后缀（去掉 songKey 前缀）
+    final prefix = '${sk}_';
+    final suffix = key.startsWith(prefix) ? key.substring(prefix.length) : key;
+    return '${_root!.path}${Platform.pathSeparator}$sk${Platform.pathSeparator}$suffix.bin';
+  }
 
   /// 读取一段已缓存数据。该段未全部命中返回 null。
   ///
@@ -394,52 +408,62 @@ class AudioCacheStore {
     return false;
   }
 
-  /// LRU：总量超过上限时按 lastAccess 驱逐整首，直到放下限或只剩一项。
+  /// LRU：总量超过上限时按歌曲驱逐整首目录，直到放下限或只剩一首。
   ///
-  /// 驱逐经 [_writeChain] 串行化，避免与排队中的 [write] 竞态（否则驱后被
-  /// 排队的写会重开文件、`putIfAbsent` 复活已驱逐条目）。
+  /// 同一歌曲多音质共享一个目录：按歌曲 key 分组，用组内最小 lastAccess
+  /// 做 LRU 排序，驱逐时整组删除（整个歌曲目录）。
+  ///
+  /// 驱逐经 [_writeChain] 串行化，避免与排队中的 [write] 竞态。
   void _prune() {
     final root = _root;
     if (root == null) return;
     final limit = overrideMaxBytes ?? maxBytes;
     if (totalBytes <= limit || _entries.length <= 1) return;
-    var ordered = _entries.entries.toList()
-      ..sort((a, b) => a.value.lastAccess.compareTo(b.value.lastAccess));
-    final victims = <String>[];
-    while (totalBytes > limit && ordered.length > 1) {
-      final victim = ordered.removeAt(0).key;
-      // 同步移除，使 totalBytes 随每次驱逐重算、只驱逐到放下限为止。
-      _entries.remove(victim);
-      victims.add(victim);
+
+    // 按歌曲 key 分组，记录组内最小 lastAccess 和组总大小
+    final songGroups = <String, _SongGroup>{};
+    for (final MapEntry(key: ak, value: e) in _entries.entries) {
+      final sk = CacheIndex.songKeyFromAudioKey(ak) ?? ak;
+      final group = songGroups.putIfAbsent(sk, () => _SongGroup(sk));
+      group.audioKeys.add(ak);
+      group.totalBytes += e.sizeBytes;
+      if (group.minLastAccess == 0 || e.lastAccess < group.minLastAccess) {
+        group.minLastAccess = e.lastAccess;
+      }
     }
-    for (final victim in victims) {
-      // 条目已同步移除（驱逐语义即时生效），仅把文件层 IO（关句柄/删文件）串行
-      // 进 _writeChain，避免与排队中的 write 竞态：排队写会在删文件前跑完，后续
-      // 对新文件的写走在新副本之后，不再「复活」已被驱逐、文件被删的旧副本。
+
+    // 按 minLastAccess 升序排列（最旧在前）
+    var ordered = songGroups.values.toList()
+      ..sort((a, b) => a.minLastAccess.compareTo(b.minLastAccess));
+
+    final victims = <String>[]; // 被驱逐的歌曲 key
+    while (totalBytes > limit && ordered.length > 1) {
+      final victim = ordered.removeAt(0);
+      // 同步移除组内所有条目
+      for (final ak in victim.audioKeys) {
+        _entries.remove(ak);
+      }
+      victims.add(victim.songKey);
+    }
+
+    for (final sk in victims) {
       _writeChain = _writeChain
-          .then((_) => _evictIo(victim))
+          .then((_) => _evictSongDir(sk))
           .catchError((_) {});
     }
   }
 
-  /// 驱逐的落盘执行（关句柄 + 删条目 + 删文件 + 落索引），由 [_prune] 在链上
-  /// 串行调用。
-  ///
-  /// **原子语义**：这里同时删 `_entries` 条目与物理文件，避免「条目在、文件无」
-  /// 的不一致——若排队中的 [write] 先于本 IO 执行（`putIfAbsent` 复活条目并写
-  /// 文件），本 IO 会把它再次删掉，最终条目与文件一致地消失。`_prune` 里的同步
-  /// 移除保证 while 循环的 LRU 判定即时生效，这里是兜底收口。
-  ///
-  /// **保留 sessionUrl**：直链随会话存活（见类注释），被驱逐的歌若再次续读/seek
-  /// 仍能回源重缓存，避免「磁盘已清 + 直链已删 → 404 卡死」。
-  Future<void> _evictIo(String key) async {
-    _entries.remove(key);
+  /// 驱逐整首歌目录（所有音质 + 封面 + 歌词）。
+  Future<void> _evictSongDir(String songKey) async {
     try {
-      await _writers[key]?.close();
-      _writers.remove(key);
-      final f = File(filePath(key));
-      if (await f.exists()) await f.delete();
+      final dir = Directory(
+        '${_root!.path}${Platform.pathSeparator}$songKey',
+      );
+      if (await dir.exists()) await dir.delete(recursive: true);
     } catch (_) {}
+    // 清理可能残留的条目（理论上 _prune 已同步移除，这里兜底）
+    _entries.removeWhere((ak, _) =>
+        CacheIndex.songKeyFromAudioKey(ak) == songKey);
     _indexDirty = true;
     await _persistIfDirty();
   }
@@ -477,6 +501,58 @@ class AudioCacheStore {
     } catch (_) {
       _entries.clear();
     }
+  }
+
+  /// 扫描已存在的歌曲目录，把索引中缺失的音频文件补入。
+  ///
+  /// 迁移/手动复制/索引丢失等场景下，磁盘文件已存在但索引无记录。
+  /// 补入时标记为完整缓存（totalSize = 文件大小）。
+  ///
+  /// 目录结构：`cache/<songKey>/<level>_<type>.bin`
+  Future<void> _scanExisting() async {
+    final root = _root;
+    if (root == null) return;
+    try {
+      await for (final entity in root.list()) {
+        if (entity is! Directory) continue;
+        final dirName = entity.uri.pathSegments.lastWhere(
+          (s) => s.isNotEmpty,
+          orElse: () => '',
+        );
+        if (dirName.isEmpty) continue;
+
+        // 扫描目录下所有 .bin 文件
+        await for (final file in entity.list()) {
+          if (file is! File) continue;
+          final fileName = file.uri.pathSegments.lastWhere(
+            (s) => s.isNotEmpty,
+            orElse: () => '',
+          );
+          if (!fileName.endsWith('.bin')) continue;
+
+          // 还原 audioKey：songKey + 去掉 .bin 后缀的文件名
+          final suffix = fileName.replaceAll('.bin', '');
+          final audioKey = '${dirName}_$suffix';
+
+          // 索引中已有该 key 的跳过
+          if (_entries.containsKey(audioKey)) continue;
+
+          final size = await file.length();
+          if (size <= 0) continue;
+
+          final e = CacheEntry()
+            ..totalSize = size
+            ..sizeBytes = size
+            ..lastAccess = DateTime.now().millisecondsSinceEpoch;
+          e.addRange(0, size); // 标记为完整缓存
+          _entries[audioKey] = e;
+        }
+      }
+      if (_entries.isNotEmpty) {
+        _indexDirty = true;
+        await _persistIfDirty();
+      }
+    } catch (_) {}
   }
 
   Future<void> _persistIfDirty() async {
@@ -569,4 +645,13 @@ class Range {
   final int start;
   final int end;
   const Range(this.start, this.end);
+}
+
+/// LRU 分组用：同一首歌的所有音频条目聚合。
+class _SongGroup {
+  final String songKey;
+  final List<String> audioKeys = [];
+  int totalBytes = 0;
+  int minLastAccess = 0;
+  _SongGroup(this.songKey);
 }
