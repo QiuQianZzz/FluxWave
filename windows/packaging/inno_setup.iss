@@ -23,7 +23,7 @@
 #endif
 #define MyAppPublisher "QiuQianZzz"
 #define MyAppExeName "fluxwave.exe"
-#define MyAppSourceDir "..\..\build\windows\x64\runner\Release"
+#define MyAppSourceDir "..\..\build\windows\" + ArchSuffix + "\runner\Release"
 
 [Setup]
 AppId={{A7E3F2D1-8B4C-4E5A-9F6D-2C1B0A3E5D7F}

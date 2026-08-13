@@ -65,9 +65,10 @@ jobs:
       - name: Package zip
         shell: powershell
         run: |
+          $buildDir = "build\windows\${{ matrix.arch }}\runner\Release"
           $zip = "fluxwave-${{ steps.tag.outputs.version }}-windows-${{ matrix.arch }}.zip"
           if (Test-Path $zip) { Remove-Item $zip }
-          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath $zip
+          Compress-Archive -Path "$buildDir\*" -DestinationPath $zip
 
       - name: Install Inno Setup 7
         shell: powershell
