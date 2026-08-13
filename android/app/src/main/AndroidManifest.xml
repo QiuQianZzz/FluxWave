@@ -1,11 +1,56 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 联网必需：release 包只有 main manifest 生效（debug/profile 各自自带），
+         缺此项会导致发布版完全无法访问网络。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 前台服务权限：媒体播放通知栏控制必需 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- Android 13+ 通知权限：需要动态申请，但 manifest 中必须声明 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 唤醒锁：保持后台播放时 CPU 不休眠 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 蓝牙音频控制：连接蓝牙耳机时的媒体控制 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- 音频设置：调节音频焦点等 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <!-- android:label 引用 @string/app_name，由各 buildType 的 resValue 注入
+         不同值（debug=FluxWave Dev，release=FluxWave），实现安装后应用名区分。 -->
     <application
-        android:label="fluxwave"
+        android:label="@string/app_name"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:enableOnBackInvokedCallback="true">
+        <!-- 前台服务：媒体播放通知栏控制必需 -->
+        <service
+            android:name="com.ryanheise.audioservice.AudioService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+        <!-- 媒体按钮接收器 -->
+        <receiver
+            android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+        <!-- 主 Activity 不再挂 LAUNCHER 过滤：启动图标改由下方 activity-alias 承载，
+             以便运行时用 PackageManager 在多个图标间切换（见 MainActivity.kt）。
+             约定：alias 名 LauncherIcon_<id>，默认图标用 @mipmap/ic_launcher，
+             其余用 @mipmap/app_icon_<id>。每个 alias 必须带 MAIN/LAUNCHER
+             intent-filter（否则不算启动入口、切换逻辑枚举不到）。
+             新增图标 = 加一段 alias + 对应 mipmap。
+             注意：flutter run 会硬编码启动第一个 MAIN/LAUNCHER 入口
+             （LauncherIcon_default），被运行时禁用会导致开发启动失败，
+             详见 MainActivity.kt 的 setLauncherIcon 注释。 -->
         <activity
             android:name=".MainActivity"
-            android:exported="true"
+            android:exported="false"
             android:launchMode="singleTop"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
@@ -20,11 +65,33 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+        </activity>
+        <!-- 默认图标 alias：安装后默认启用；对应 @mipmap/ic_launcher。 -->
+        <activity-alias
+            android:name="com.qiuqianzzz.fluxwave.LauncherIcon_default"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-        </activity>
+        </activity-alias>
+        <!-- 备选图标：默认禁用，设置页可启用；对应 @mipmap/app_icon_alt。 -->
+        <activity-alias
+            android:name="com.qiuqianzzz.fluxwave.LauncherIcon_alt"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/app_icon_alt"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

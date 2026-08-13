@@ -1,0 +1,125 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+import '../netease/netease_api.dart';
+import 'lyric_model.dart';
+import 'lyric_parser.dart';
+
+/// 歌词加载编排。
+///
+/// 负责：
+/// 1. 调用 `NeteaseApi.lyric` 拿原始响应；
+/// 2. 字段提取（yrc > lrc，ytlrc > tlyric，yromalrc > romalrc）；
+/// 3. 解析 + 翻译/罗马音对齐；
+/// 4. 进程内 LRU 缓存（key = songId）。
+class LyricProvider {
+  /// 歌词请求函数（注入 [NeteaseApi.lyric]，便于测试 mock）。
+  final Future<Map<String, dynamic>> Function(int songId) _fetchLyric;
+
+  // 进程内缓存：songId → 解析后的歌词。容量 40。
+  static const _kCacheLimit = 40;
+  final _cache = <int, List<LyricLine>>{};
+  final _loading = <int, Future<List<LyricLine>>>{};
+
+  LyricProvider(NeteaseApi api) : _fetchLyric = api.lyric;
+
+  /// 测试用构造：直接注入 fetch 函数。
+  @visibleForTesting
+  LyricProvider.forTest(this._fetchLyric);
+
+  /// 加载歌词。命中缓存立即返回；并发请求同一 songId 时共享同一个 Future。
+  Future<List<LyricLine>> load(int songId) async {
+    final cached = _cache[songId];
+    if (cached != null) return cached;
+
+    final pending = _loading[songId];
+    if (pending != null) return pending;
+
+    final fut = _fetchAndParse(songId);
+    _loading[songId] = fut;
+    try {
+      final lines = await fut;
+      _putCache(songId, lines);
+      return lines;
+    } finally {
+      _loading.remove(songId);
+    }
+  }
+
+  /// 同步取缓存（无网络请求）；无缓存返回 null。
+  List<LyricLine>? cached(int songId) => _cache[songId];
+
+  /// 失效单首歌的缓存（切歌时不必要调用，仅用于强制刷新）。
+  void invalidate(int songId) {
+    _cache.remove(songId);
+  }
+
+  /// 清空所有缓存。
+  void clear() {
+    _cache.clear();
+  }
+
+  Future<List<LyricLine>> _fetchAndParse(int songId) async {
+    try {
+      final body = await _fetchLyric(songId);
+      if (body['code'] != 200) return const [];
+
+      // 主歌词：yrc 优先，回退 lrc
+      final yrc = _extractLyricText(body, 'yrc');
+      final lrc = _extractLyricText(body, 'lrc');
+      final mainText = yrc.isNotEmpty ? yrc : lrc;
+      if (mainText.isEmpty) return const [];
+
+      // 解析主歌词
+      final mainLines = LyricParser.parseAuto(mainText);
+      if (mainLines.isEmpty) return const [];
+
+      // 翻译：ytlrc 优先，回退 tlyric
+      final transText = _extractLyricText(body, 'ytlrc').isNotEmpty
+          ? _extractLyricText(body, 'ytlrc')
+          : _extractLyricText(body, 'tlyric');
+      var result = mainLines;
+      if (transText.isNotEmpty) {
+        final transLines = LyricParser.parseLrc(transText);
+        result = LyricParser.alignTranslation(
+          result,
+          transLines,
+          isRoman: false,
+        );
+      }
+
+      // 罗马音：yromalrc 优先，回退 romalrc
+      final romanText = _extractLyricText(body, 'yromalrc').isNotEmpty
+          ? _extractLyricText(body, 'yromalrc')
+          : _extractLyricText(body, 'romalrc');
+      if (romanText.isNotEmpty) {
+        final romanLines = LyricParser.parseLrc(romanText);
+        result = LyricParser.alignTranslation(
+          result,
+          romanLines,
+          isRoman: true,
+        );
+      }
+
+      return result;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 提取响应字段 `{field: {lyric: "..."}}` 中的 lyric 字符串。
+  static String _extractLyricText(Map<String, dynamic> body, String field) {
+    final obj = body[field];
+    if (obj is! Map) return '';
+    final lyric = obj['lyric'];
+    return lyric is String ? lyric : '';
+  }
+
+  void _putCache(int songId, List<LyricLine> lines) {
+    if (_cache.length >= _kCacheLimit && !_cache.containsKey(songId)) {
+      _cache.remove(_cache.keys.first);
+    }
+    _cache[songId] = lines;
+  }
+}

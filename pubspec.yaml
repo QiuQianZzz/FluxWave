@@ -1,5 +1,5 @@
 name: fluxwave
-description: "A new Flutter project."
+description: 'FluxWave - 跨平台聚合音乐播放器'
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 0.1.0+1
 
 environment:
   sdk: ^3.12.2
@@ -35,9 +35,67 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # --- NetEase Cloud Music crypto core dependencies ---
+  # crypto: MD5 / SHA-256 / HMAC 摘要 (Node 端 createHash/createHmac 的 Dart 对应)
+  crypto: ^3.0.6
+  # pointycastle: 纯 Dart 的 AES / RSA / X25519 / AES-GCM 原语(Windows+Android 都可用)
+  pointycastle: ^3.9.1
+  # convert: hex / base64 编解码
+  convert: ^3.1.2
+  # cryptography: xeapi 的 X25519 ECDH + AES-GCM(Windows/Android 纯 Dart 回退)
+  cryptography: ^2.7.0
+
+  # --- NetEase session persistence + QR UI ---
+  # shared_preferences: 轻量 KV (deviceId / cookies / anonToken)
+  shared_preferences: ^2.5.2
+  # path_provider: 应用文档目录 (未来设备指纹/离线缓存落地用)
+  path_provider: ^2.1.6
+  # path: 跨平台路径拼接/规范化 (日志导出等)
+  path: ^1.9.1
+  # qr_flutter: 纯 Dart QR 码渲染 (MD3 登录页 UI)
+  qr_flutter: ^4.1.0
+
+  # --- State management ---
+  # provider: 全局共享 NeteaseClient/登录态 (对齐 SNext Pinia store 概念)
+  provider: ^6.1.2
+  window_manager: ^0.5.2
+  just_audio: ^0.10.6
+  audio_session: ^0.2.4
+  audio_service: ^0.18.17
+  just_audio_windows: ^0.2.3
+  # archive: 批量导出日志时打包 ZIP
+  archive: ^3.6.1
+  # share_plus: Android 导出日志后弹系统分享面板
+  share_plus: ^12.0.0
+  file_selector: ^1.1.0
+  package_info_plus: ^9.0.1
+  meta: ^1.18.0
+  # SQLite 数据库：播放记录持久化存储
+  sqflite: ^2.4.2
+  # 跨平台 FFI 支持（Windows 桌面端需要）
+  sqflite_common_ffi: ^2.3.4+4
+  # SQLite 原生库打包（随 APK/IPA 分发，替代构建时从 GitHub 下载）
+  sqlite3_flutter_libs: ^0.6.0
+  # 图表：播放时长分布柱状图
+  fl_chart: ^0.70.2
+  # 热力图：GitHub 贡献图风格播放热力图
+  contribution_heatmap: ^0.6.0
+  # 日期格式化
+  intl: ^0.19.0
+
+# sqlite3 原生库下载源：默认从 GitHub releases 下载（国内访问超时），
+# 改为走 GitHub 加速镜像。若镜像失效，可换 source: source + 本地 sqlite3.c。
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3
+      url_pattern: "https://ghfast.top/https://github.com/simolus3/sqlite3.dart/releases/download/$RELEASE_TAG/$FILENAME"
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # 测试内 mock path_provider 平台路径（导出服务落盘位置）
+  path_provider_platform_interface: ^2.1.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -45,17 +103,22 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    # 应用图标切换的预览图（lib/core/app_icon.dart 定义）。新增图标只需放入
+    # assets/icon/previews/，无需改本声明。
+    - assets/icon/previews/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -87,3 +150,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  image_path: "assets/icon/design_default.png"
+  android: true
+  windows:
+    generate: true
+    image_path: "assets/icon/design_default.png"
+    icon_size: 256

@@ -1,0 +1,4 @@
+<resources>
+    <!-- 正式 (release) 构建的应用名；debug/profile 由各自 variant 资源目录覆盖 -->
+    <string name="app_name">FluxWave</string>
+</resources>

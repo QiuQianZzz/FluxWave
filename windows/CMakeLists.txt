@@ -57,6 +57,16 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# just_audio_windows 在新版 MSVC (14.51+) 下有两个编译问题：
+# 1. uri_utils.hpp 含非 UTF-8 字符 → C4819 警告被 /WX 升级为错误
+# 2. <experimental/coroutine> 被弃用 → C2338 static assertion 错误
+# 单独给该 target 加 /utf-8 解析源文件，并抑制 coroutine 弃用警告。
+if(TARGET just_audio_windows_plugin)
+  target_compile_options(just_audio_windows_plugin PRIVATE /utf-8 /wd4819)
+  target_compile_definitions(just_audio_windows_plugin PRIVATE
+    _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+endif()
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can

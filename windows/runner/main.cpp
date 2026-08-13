@@ -27,7 +27,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"fluxwave", origin, size)) {
+  if (!window.Create(L"FluxWave", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
@@ -38,6 +38,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
-  ::CoUninitialize();
-  return EXIT_SUCCESS;
+  // Force-exit the process to skip C++ destructors and CoUninitialize.
+  // just_audio_windows creates MediaPlayer as a WinRT COM object under STA
+  // (COINIT_APARTMENTTHREADED). After the message loop exits, Flutter engine
+  // teardown + CoUninitialize triggers synchronous COM release on the STA
+  // thread, including MediaPlayer.Close() which blocks ~5s on network stream
+  // shutdown. ExitProcess lets the OS reclaim all resources directly.
+  ::ExitProcess(EXIT_SUCCESS);
 }

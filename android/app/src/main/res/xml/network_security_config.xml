@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 网络安全配置：仅对本地回环代理（音频缓存代理 http://127.0.0.1:<port>）
+     放行明文 HTTP（cleartext）。其余域名一律走系统默认（Android 9+ 默认禁明文）。
+     原因：音频缓存本地代理无 TLS 必要性（同机回环），但 ExoPlayer 连它时会被
+     Android 的 CleartextNotPermittedException 拒绝 → 播放源错误。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
