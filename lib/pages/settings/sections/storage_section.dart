@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -63,7 +64,19 @@ class _StorageSectionState extends State<StorageSection> {
   }
 
   Future<void> _clearCache() async {
+    // 删除所有歌曲目录（音频 + 封面 + 歌词），并清空音频索引。
     await AudioCacheStore.instance.clearAll();
+    // 删除所有歌曲目录
+    final root = AudioCacheStore.instance.rootDirectory;
+    if (root != null) {
+      try {
+        await for (final entity in root.list()) {
+          if (entity is Directory) {
+            await entity.delete(recursive: true);
+          }
+        }
+      } catch (_) {}
+    }
     _refresh();
   }
 
