@@ -34,7 +34,7 @@ class UpdateService {
       if (_isNewer(latestVersion, current)) {
         return UpdateInfo(
           currentVersion: currentVersion,
-          latestVersion: release.tagName,
+          latestVersion: _stripVersionPrefix(release.tagName),
           releaseNotes: release.body,
           releaseUrl: release.htmlUrl,
           publishedAt: release.publishedAt,
@@ -67,11 +67,17 @@ class UpdateService {
 
   /// 从版本字符串中提取可比较的版本号（去掉 v 前缀和预发布后缀）。
   String _normalizeVersion(String version) {
-    var v = version.trim();
-    if (v.startsWith('v') || v.startsWith('V')) v = v.substring(1);
+    var v = _stripVersionPrefix(version);
     // 去掉预发布后缀（-beta.1, -rc.2 等）只比较主版本号
     final dashIndex = v.indexOf('-');
     if (dashIndex != -1) v = v.substring(0, dashIndex);
+    return v;
+  }
+
+  /// 去掉版本号的 v/V 前缀。
+  String _stripVersionPrefix(String version) {
+    var v = version.trim();
+    if (v.startsWith('v') || v.startsWith('V')) v = v.substring(1);
     return v;
   }
 
