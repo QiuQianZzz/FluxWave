@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -18,6 +17,7 @@ import 'core/cover_color_extractor.dart';
 import 'core/logging/app_crash.dart';
 import 'core/logging/app_log.dart';
 import 'core/localizations/zh.dart';
+import 'core/platform_utils.dart';
 import 'core/player/playback_migration.dart';
 import 'core/player/playback_storage.dart';
 import 'core/playback_stats/database_helper.dart';
@@ -76,7 +76,7 @@ void main() {
       await migrateLegacy(playbackStorage);
 
       // 桌面端：隐藏系统标题栏，由自定义 TitleBar 接管
-      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      if (PlatformUtils.isDesktop) {
         try {
           await windowManager.ensureInitialized();
           await windowManager.setTitleBarStyle(TitleBarStyle.hidden);

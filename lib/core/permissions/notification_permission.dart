@@ -1,7 +1,7 @@
-import 'dart:io';
-
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
+import '../platform_utils.dart';
 
 /// 通知权限申请工具。
 ///
@@ -15,7 +15,7 @@ class NotificationPermission {
   /// 仅 Android 13+ 需要申请；其他平台直接返回 true。
   /// 返回 true 表示权限已授予，false 表示未授予。
   static Future<bool> requestIfNeeded() async {
-    if (!Platform.isAndroid) return true;
+    if (!PlatformUtils.isAndroid) return true;
 
     try {
       final result = await _channel.invokeMethod<bool>(
@@ -31,7 +31,7 @@ class NotificationPermission {
 
   /// 检查通知权限是否已授予。
   static Future<bool> isGranted() async {
-    if (!Platform.isAndroid) return true;
+    if (!PlatformUtils.isAndroid) return true;
 
     try {
       final result = await _channel.invokeMethod<bool>(
@@ -48,7 +48,7 @@ class NotificationPermission {
   ///
   /// 用于用户已拒绝权限且系统不再弹出申请时，引导用户手动开启。
   static Future<bool> openSettings() async {
-    if (!Platform.isAndroid) return false;
+    if (!PlatformUtils.isAndroid) return false;
 
     try {
       final result = await _channel.invokeMethod<bool>(

@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -9,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/netease/netease_auth.dart';
 import '../../core/netease/netease_client.dart';
 import '../../core/logging/app_log.dart';
+import '../../core/platform_utils.dart';
 import '../../providers/netease_provider.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/title_bar.dart';
@@ -156,13 +155,7 @@ class _QrLoginPageState extends State<QrLoginPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final isDesktop =
-        [
-          TargetPlatform.windows,
-          TargetPlatform.macOS,
-          TargetPlatform.linux,
-        ].contains(defaultTargetPlatform) &&
-        TitleBar.enabled;
+    final isDesktop = PlatformUtils.isDesktop && TitleBar.enabled;
 
     final scaffold = Scaffold(
       appBar: AppBar(title: const Text('登录')),

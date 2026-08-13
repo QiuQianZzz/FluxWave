@@ -9,6 +9,7 @@ import '../core/audio_cache/audio_cache.dart';
 import '../core/audio_cache/proxy_server.dart';
 import '../core/audio_service/media_session_manager.dart';
 import '../core/logging/app_log.dart';
+import '../core/platform_utils.dart';
 import '../core/playback_stats/database_helper.dart';
 import '../core/player/playback_storage.dart';
 import '../core/player/song_url.dart';
@@ -437,14 +438,13 @@ class PlayerProvider extends ChangeNotifier {
     // 界面 0~100% 线性映射，默认 windowsVolumePercent%），设置页滑块可调并
     // 持久化，外放与耳机都有余量。
     // Android/iOS：_kMobileVolume（系统级音量由 audio_session 接管，无类似问题）。
-    _appliedVolume = defaultTargetPlatform == TargetPlatform.windows
+    _appliedVolume = PlatformUtils.isWindows
         ? settings.windowsVolume
         : _kMobileVolume;
     unawaited(_player.setVolume(_appliedVolume));
     // 仅移动端配置音频焦点（audio_session 仅支持 Android/iOS，其余平台会抛
     // MissingPluginException，故限制平台调用）。
-    if (defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS) {
+    if (PlatformUtils.isMobile) {
       unawaited(_configureSession());
       unawaited(_initMediaSession());
     }
@@ -1654,7 +1654,7 @@ class PlayerProvider extends ChangeNotifier {
   /// [SettingsProvider.windowsVolumeCap]，立即重施加。由设置页音量滑块在
   /// 调整时调用；仅 Windows 生效（其余平台固定 [_kMobileVolume]）。
   void syncWindowsVolume() {
-    if (defaultTargetPlatform != TargetPlatform.windows) return;
+    if (!PlatformUtils.isWindows) return;
     _appliedVolume = settings.windowsVolume;
     unawaited(_player.setVolume(_appliedVolume));
   }

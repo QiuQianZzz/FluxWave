@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../core/platform_utils.dart';
 import '../providers/player_provider.dart';
 import 'title_bar.dart';
 
@@ -40,14 +40,11 @@ class _PlayerPersistenceGuardState extends State<PlayerPersistenceGuard>
   bool _flushRunning = false;
   DateTime? _lastFlushAt;
 
-  static bool get _isDesktop =>
-      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-
   @override
   void initState() {
     super.initState();
     _player = context.read<PlayerProvider>();
-    if (_isDesktop && TitleBar.enabled) {
+    if (PlatformUtils.isDesktop && TitleBar.enabled) {
       try {
         windowManager.setPreventClose(true);
         windowManager.addListener(this);
@@ -101,7 +98,7 @@ class _PlayerPersistenceGuardState extends State<PlayerPersistenceGuard>
   @override
   void dispose() {
     _lifecycle?.dispose();
-    if (_isDesktop && TitleBar.enabled) {
+    if (PlatformUtils.isDesktop && TitleBar.enabled) {
       try {
         windowManager.removeListener(this);
       } catch (_) {}

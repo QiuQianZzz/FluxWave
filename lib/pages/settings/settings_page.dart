@@ -1,6 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/platform_utils.dart';
 import '../../widgets/collapsing_title.dart';
 import '../../widgets/page_scroll_view.dart';
 import 'sections/about_section.dart';
@@ -186,8 +186,7 @@ class _SettingsList extends StatelessWidget {
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   for (final e in _kEntries)
-                    if (!e.androidOnly ||
-                        defaultTargetPlatform == TargetPlatform.android)
+                    if (!e.androidOnly || PlatformUtils.isAndroid)
                       ListTile(
                         leading: Icon(e.icon, color: cs.onSurfaceVariant),
                         title: Text(e.title),

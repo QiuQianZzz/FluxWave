@@ -1,6 +1,6 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/services.dart';
+
+import 'platform_utils.dart';
 
 /// Android 桌面图标运行时切换（id 驱动，支持任意多个图标）。
 ///
@@ -13,7 +13,7 @@ class LauncherIconSwitcher {
   /// 切换桌面图标为 [id] 对应的那一个（如 'default'、'alt'）。
   /// 非 Android 平台直接返回（仅默认图标生效）。
   static Future<void> setIcon(String id) async {
-    if (!Platform.isAndroid) return;
+    if (!PlatformUtils.isAndroid) return;
     try {
       await _channel.invokeMethod<void>('setLauncherIcon', id);
     } catch (_) {

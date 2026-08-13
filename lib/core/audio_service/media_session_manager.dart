@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../models/song.dart';
 import '../permissions/notification_permission.dart';
+import '../platform_utils.dart';
 import 'app_audio_handler.dart';
 
 /// 媒体会话管理器：负责初始化 [AudioService] 并持有 [AppAudioHandler] 实例。
@@ -50,15 +51,13 @@ class MediaSessionManager {
     if (_initialized) return;
 
     // 桌面平台不需要媒体通知
-    if (defaultTargetPlatform == TargetPlatform.windows ||
-        defaultTargetPlatform == TargetPlatform.linux ||
-        defaultTargetPlatform == TargetPlatform.macOS) {
+    if (PlatformUtils.isDesktop) {
       _initialized = true;
       return;
     }
 
     // Android 13+ 需要运行时申请通知权限
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    if (PlatformUtils.isAndroid) {
       final granted = await NotificationPermission.requestIfNeeded();
       debugPrint('[MediaSession] 通知权限申请结果: $granted');
       // 即使权限未授予也继续初始化，用户可以在设置里手动开启

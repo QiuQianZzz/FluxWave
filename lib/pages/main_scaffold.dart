@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:collection';
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
 
 import '../constants/nav_thresholds.dart';
+import '../core/platform_utils.dart';
 import '../core/update_service.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
@@ -389,13 +388,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   // ── 宽屏：可折叠侧边栏 ──
   Widget _buildExtended(BuildContext context, {required bool blur}) {
     final theme = Theme.of(context);
-    final isDesktop =
-        [
-          TargetPlatform.windows,
-          TargetPlatform.macOS,
-          TargetPlatform.linux,
-        ].contains(defaultTargetPlatform) &&
-        TitleBar.enabled;
+    final isDesktop = PlatformUtils.isDesktop && TitleBar.enabled;
 
     return Scaffold(
       body: Column(

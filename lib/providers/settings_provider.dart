@@ -6,6 +6,7 @@ import '../core/audio_cache/cache_store.dart';
 import '../core/logging/app_log.dart';
 import '../core/lyric/line_lyric_reveal_mode.dart';
 import '../core/netease/netease_config.dart';
+import '../core/platform_utils.dart';
 
 /// 应用级设置 Provider（仿 ThemeProvider）：持久化网络/风控开关，
 /// 并同步写入 [NeteaseConfig] 供纯 Dart 请求层读取。
@@ -145,7 +146,7 @@ class SettingsProvider extends ChangeNotifier {
   bool get bypassSystemProxy => _bypassSystemProxy;
 
   /// 当前是否 Android（IP 注入硬门控）。
-  static bool get isAndroid => defaultTargetPlatform == TargetPlatform.android;
+  static bool get isAndroid => PlatformUtils.isAndroid;
 
   /// 从 SharedPreferences 恢复设置并写入 [NeteaseConfig]。
   Future<void> init() async {

@@ -1,15 +1,11 @@
 import 'dart:io';
 
 import 'package:archive/archive.dart';
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../platform_utils.dart';
 import 'app_log.dart';
-
-/// 当前是否 Android 平台（share_plus 依赖平台通道，仅在 Android 上使用分享面板）。
-bool get isAndroid =>
-    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
 /// 日志导出服务：把日志文件导出到用户可见位置（供收集排障信息）。
 ///
@@ -30,7 +26,7 @@ class LogExportService {
   static Future<String> buildExportFile(List<LogFileMetadata> files) async {
     if (files.isEmpty) throw StateError('没有可导出的日志文件');
     // Android 走临时目录（share_plus 需要 readable 路径）；桌面直接落 Downloads。
-    final base = isAndroid ? Directory.systemTemp : await _downloadsDir();
+    final base = PlatformUtils.isAndroid ? Directory.systemTemp : await _downloadsDir();
     await base.create(recursive: true);
     final target = File(p.join(base.path, suggestedFileName(files)));
     await _writeTo(target, files);

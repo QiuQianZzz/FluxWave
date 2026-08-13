@@ -1,9 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/lyric/line_lyric_reveal_mode.dart';
 import '../../../core/permissions/notification_permission.dart';
+import '../../../core/platform_utils.dart';
 import '../../../providers/player_provider.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/section_card.dart';
@@ -48,7 +48,7 @@ class PlaySection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        if (defaultTargetPlatform == TargetPlatform.windows) ...[
+        if (PlatformUtils.isWindows) ...[
           SectionCard(
             icon: Icons.volume_up_rounded,
             title: '音量',
@@ -111,7 +111,7 @@ class PlaySection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        if (defaultTargetPlatform == TargetPlatform.android) ...[
+        if (PlatformUtils.isAndroid) ...[
           _NotificationPermissionCard(),
           const SizedBox(height: 8),
         ],

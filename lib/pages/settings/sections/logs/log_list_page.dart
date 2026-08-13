@@ -1,8 +1,6 @@
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -10,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/logging/app_crash.dart';
 import '../../../../core/logging/app_log.dart';
 import '../../../../core/logging/log_export.dart';
+import '../../../../core/platform_utils.dart';
 import '../../../../widgets/app_toast.dart';
 import '../../../../widgets/page_scroll_view.dart';
 import 'log_detail_page.dart';
@@ -45,18 +44,6 @@ class _LogListPageState extends State<LogListPage> {
 
   /// 滚动控制：Scrollbar + 到顶/到底悬浮按钮共用。
   final ScrollController _scrollController = ScrollController();
-
-  /// 当前平台：桌面平台框架自带滚动条（无需再包一层 Scrollbar）。
-  bool get _isDesktop {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.windows:
-      case TargetPlatform.macOS:
-      case TargetPlatform.linux:
-        return true;
-      default:
-        return false;
-    }
-  }
 
   @override
   void initState() {
@@ -142,7 +129,7 @@ class _LogListPageState extends State<LogListPage> {
   Future<void> _export(List<LogFileMetadata> files) async {
     try {
       final String path;
-      if (isAndroid) {
+      if (PlatformUtils.isAndroid) {
         path = await LogExportService.buildExportFile(files);
       } else {
         final location = await getSaveLocation(
@@ -158,7 +145,7 @@ class _LogListPageState extends State<LogListPage> {
         path = await LogExportService.buildExportTo(files, location.path);
       }
       if (!mounted) return;
-      if (isAndroid) {
+      if (PlatformUtils.isAndroid) {
         await SharePlus.instance.share(
           ShareParams(
             files: [XFile(path)],
@@ -430,7 +417,7 @@ class _LogListPageState extends State<LogListPage> {
         );
       },
     );
-    return _isDesktop
+    return PlatformUtils.isDesktop
         ? list
         : Scrollbar(controller: _scrollController, child: list);
   }

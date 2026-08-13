@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../core/lyric/lyric_model.dart';
 import '../core/lyric/lyric_provider.dart';
+import '../core/platform_utils.dart';
 import '../constants/nav_thresholds.dart';
 import '../models/song.dart';
 import '../providers/netease_provider.dart';
@@ -228,10 +229,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// 当前是否为移动平台（Android/iOS）。
   /// 按平台而非屏幕宽度判定，适配宽屏 Android 平板。
-  bool _isMobile(BuildContext context) {
-    final p = Theme.of(context).platform;
-    return p == TargetPlatform.android || p == TargetPlatform.iOS;
-  }
+  bool _isMobile(BuildContext context) => PlatformUtils.isMobile;
 
   /// 平台额外顶边距：移动端已有系统状态栏，略加即可；
   /// 桌面端无系统 chrome，需稍多留白。
