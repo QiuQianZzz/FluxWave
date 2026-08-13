@@ -18,17 +18,9 @@ concurrency:
 
 jobs:
   build-windows:
-    name: Windows ${{ matrix.arch }}
+    name: Windows
     runs-on: windows-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            platform: windows-x64
-          - arch: arm64
-            platform: windows-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,16 +51,15 @@ jobs:
           (Get-Content pubspec.yaml) -replace '^version: .*', "version: ${{ steps.tag.outputs.version }}+1" |
             Set-Content pubspec.yaml
 
-      - name: Build Windows ${{ matrix.arch }}
-        run: flutter build windows --release --target-platform ${{ matrix.platform }}
+      - name: Build Windows Release
+        run: flutter build windows --release
 
       - name: Package zip
         shell: powershell
         run: |
-          $buildDir = "build\windows\${{ matrix.arch }}\runner\Release"
-          $zip = "fluxwave-${{ steps.tag.outputs.version }}-windows-${{ matrix.arch }}.zip"
+          $zip = "fluxwave-${{ steps.tag.outputs.version }}-windows-x64.zip"
           if (Test-Path $zip) { Remove-Item $zip }
-          Compress-Archive -Path "$buildDir\*" -DestinationPath $zip
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath $zip
 
       - name: Install Inno Setup 7
         shell: powershell
@@ -86,15 +77,15 @@ jobs:
           if (-not $iscc) { throw "ISCC.exe not found" }
           & $iscc /DMyAppVersion=${{ steps.tag.outputs.clean_version }} `
               /DMyAppVersionFile=${{ steps.tag.outputs.version }} `
-              /DArchSuffix=${{ matrix.arch }} `
+              /DArchSuffix=x64 `
               windows\packaging\inno_setup.iss
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.arch }}
+          name: windows-x64
           path: |
-            fluxwave-*-windows-${{ matrix.arch }}.zip
+            fluxwave-*-windows-x64.zip
             dist/*.exe
 
   build-android:
