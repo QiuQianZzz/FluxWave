@@ -54,6 +54,10 @@ dependencies:
   path: ^1.9.1
   # qr_flutter: 纯 Dart QR 码渲染 (MD3 登录页 UI)
   qr_flutter: ^4.1.0
+  # flutter_markdown: Markdown 渲染（更新日志展示）
+  flutter_markdown: ^0.7.7
+  # url_launcher: 打开外部链接（GitHub Releases 页面）
+  url_launcher: ^6.3.1
 
   # --- State management ---
   # provider: 全局共享 NeteaseClient/登录态 (对齐 SNext Pinia store 概念)

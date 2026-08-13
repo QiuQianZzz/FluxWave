@@ -3,9 +3,11 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_build_info.dart';
+import '../../../core/update_service.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/section_card.dart';
 import '../../../widgets/page_scroll_view.dart';
+import '../../../widgets/update_dialog.dart';
 import '../../../core/logging/app_log.dart';
 import 'logs/log_list_page.dart';
 
@@ -91,11 +93,7 @@ class AboutSection extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: () {},
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('检查更新'),
-            ),
+            const _UpdateButton(),
           ],
         ),
         const SizedBox(height: 8),
@@ -220,6 +218,54 @@ class _LogEntryTile extends StatelessWidget {
       onTap: () => Navigator.of(
         context,
       ).push(MaterialPageRoute(builder: (_) => LogListPage(kind: kind))),
+    );
+  }
+}
+
+/// 检查更新按钮：调用 GitHub API 检测新版本，有更新弹窗展示，无更新提示。
+class _UpdateButton extends StatefulWidget {
+  const _UpdateButton();
+
+  @override
+  State<_UpdateButton> createState() => _UpdateButtonState();
+}
+
+class _UpdateButtonState extends State<_UpdateButton> {
+  bool _checking = false;
+
+  Future<void> _check() async {
+    if (_checking) return;
+    setState(() => _checking = true);
+    try {
+      final info = await UpdateService.instance.check();
+      if (!mounted) return;
+      if (info != null) {
+        await UpdateDialog.show(context, info);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('当前已是最新版本'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.tonalIcon(
+      onPressed: _checking ? null : _check,
+      icon: _checking
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh_rounded, size: 18),
+      label: Text(_checking ? '检查中...' : '检查更新'),
     );
   }
 }
