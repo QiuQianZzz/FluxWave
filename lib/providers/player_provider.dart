@@ -746,6 +746,23 @@ class PlayerProvider extends ChangeNotifier {
     unawaited(_restoreFromSnapshot(snap));
   }
 
+  /// 强制从磁盘恢复播放队列（备份恢复后调用）。
+  ///
+  /// 与 [_restoreFromStorage] 不同，此方法不检查当前是否有播放中的歌曲，
+  /// 直接用磁盘数据覆盖内存状态。
+  Future<void> reloadQueue() async {
+    final storage = this.storage;
+    if (storage == null) return;
+    try {
+      final snap = await storage.load();
+      if (snap != null && snap.queue.isNotEmpty) {
+        await _restoreFromSnapshot(snap);
+      }
+    } catch (e) {
+      AppLog.error('恢复播放队列失败', tag: 'player', error: e);
+    }
+  }
+
   Future<void> _onCompleted() async {
     // 防御 just_audio_windows 的误报 completed 事件。
     // 该插件在 setUrl 后访问 BufferingProgress 失败时使用默认值 1（100%），

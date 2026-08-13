@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../core/backup_service.dart';
 import '../providers/liked_songs_provider.dart';
+import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/app_toast.dart';
@@ -113,6 +114,8 @@ class _BackupPageState extends State<BackupPage> {
     final theme = context.read<ThemeProvider>();
     // ignore: use_build_context_synchronously
     final liked = context.read<LikedSongsProvider>();
+    // ignore: use_build_context_synchronously
+    final player = context.read<PlayerProvider>();
     try {
       await BackupService.import(backupFile, items, strategy);
       // 重新加载 Provider 数据（用的是 await 前捕获的引用，不经过 context）
@@ -122,6 +125,10 @@ class _BackupPageState extends State<BackupPage> {
       }
       if (items.contains(BackupItem.likedSongs)) {
         liked.reload();
+      }
+      if (items.contains(BackupItem.playlists)) {
+        // 从磁盘恢复播放队列
+        await player.reloadQueue();
       }
       if (!mounted) return;
       AppToast.show(context, '恢复完成');
