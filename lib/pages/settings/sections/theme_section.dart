@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/app_icon.dart';
+import '../../../core/platform_utils.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../providers/theme_provider.dart';
 import '../../../widgets/color_picker_dialog.dart';
@@ -40,9 +41,14 @@ class ThemeSection extends StatelessWidget {
         ],
         const _PalettePreviewCard(),
         const SizedBox(height: 8),
-        const _BackBehaviorCard(),
-        const SizedBox(height: 8),
-        const _HapticCard(),
+        if (PlatformUtils.isAndroid) ...[
+          const _BackBehaviorCard(),
+          const SizedBox(height: 8),
+        ],
+        if (PlatformUtils.isAndroid) ...[
+          const _HapticCard(),
+          const SizedBox(height: 8),
+        ],
         if (SettingsProvider.isAndroid) ...[
           const SizedBox(height: 8),
           const _LauncherIconCard(),
