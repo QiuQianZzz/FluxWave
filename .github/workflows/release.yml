@@ -200,7 +200,7 @@ jobs:
           if [ -n "${PREVIOUS_TAG}" ]; then
             api_args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
           fi
-          gh api "${api_args[@]}" --jq '.body' | grep -v '^\*\*Full Changelog' > release-notes.md
+          gh api "${api_args[@]}" --jq '.body' | { grep -v '^\*\*Full Changelog' || true; } > release-notes.md
 
           # 追加 commit 哈希列表
           {
