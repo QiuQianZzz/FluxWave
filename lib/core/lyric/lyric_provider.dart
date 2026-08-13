@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../audio_cache/lyrics_cache.dart';
 import '../netease/netease_api.dart';
 import 'lyric_model.dart';
 import 'lyric_parser.dart';
@@ -12,7 +13,8 @@ import 'lyric_parser.dart';
 /// 1. 调用 `NeteaseApi.lyric` 拿原始响应；
 /// 2. 字段提取（yrc > lrc，ytlrc > tlyric，yromalrc > romalrc）；
 /// 3. 解析 + 翻译/罗马音对齐；
-/// 4. 进程内 LRU 缓存（key = songId）。
+/// 4. 进程内 LRU 缓存（key = songId）；
+/// 5. 磁盘缓存（`cache/<songKey>/lyrics.txt`），app 重启后命中可跳过网络。
 class LyricProvider {
   /// 歌词请求函数（注入 [NeteaseApi.lyric]，便于测试 mock）。
   final Future<Map<String, dynamic>> Function(int songId) _fetchLyric;
@@ -29,14 +31,16 @@ class LyricProvider {
   LyricProvider.forTest(this._fetchLyric);
 
   /// 加载歌词。命中缓存立即返回；并发请求同一 songId 时共享同一个 Future。
-  Future<List<LyricLine>> load(int songId) async {
+  ///
+  /// [songKey] 可选（`<source>_<songId>`），传入时启用磁盘缓存。
+  Future<List<LyricLine>> load(int songId, {String? songKey}) async {
     final cached = _cache[songId];
     if (cached != null) return cached;
 
     final pending = _loading[songId];
     if (pending != null) return pending;
 
-    final fut = _fetchAndParse(songId);
+    final fut = _fetchAndParse(songId, songKey: songKey);
     _loading[songId] = fut;
     try {
       final lines = await fut;
@@ -60,8 +64,23 @@ class LyricProvider {
     _cache.clear();
   }
 
-  Future<List<LyricLine>> _fetchAndParse(int songId) async {
+  Future<List<LyricLine>> _fetchAndParse(
+    int songId, {
+    String? songKey,
+  }) async {
     try {
+      // 1. 尝试磁盘缓存（原始文本）
+      if (songKey != null) {
+        try {
+          final diskCached = await LyricsCache.instance.read(songKey);
+          if (diskCached != null && diskCached.isNotEmpty) {
+            final lines = LyricParser.parseAuto(diskCached);
+            if (lines.isNotEmpty) return lines;
+          }
+        } catch (_) {}
+      }
+
+      // 2. 网络加载
       final body = await _fetchLyric(songId);
       if (body['code'] != 200) return const [];
 
@@ -100,6 +119,11 @@ class LyricProvider {
           romanLines,
           isRoman: true,
         );
+      }
+
+      // 3. 写入磁盘缓存（原始文本，不含翻译/罗马音对齐后的结构）
+      if (songKey != null && mainText.isNotEmpty) {
+        LyricsCache.instance.write(songKey, mainText);
       }
 
       return result;

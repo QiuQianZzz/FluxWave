@@ -330,6 +330,7 @@ class _PlayerPageState extends State<PlayerPage>
                       Expanded(
                         child: _LyricPanel(
                           songId: song.id,
+                          songKey: '${song.source}_${song.id}',
                           height: bodyH,
                           fontSize: lyricFontSize,
                         ),
@@ -529,6 +530,7 @@ class _PlayerPageState extends State<PlayerPage>
                     opacity: Curves.easeInCubic.transform(t),
                     child: _LyricPanel(
                       songId: song.id,
+                      songKey: '${song.source}_${song.id}',
                       height: lyricsH > 0.1 ? lyricsH : 0,
                     ),
                   ),
@@ -578,13 +580,19 @@ class _PlayerPageState extends State<PlayerPage>
     double size,
     double radius,
   ) {
+    final song = context.read<PlayerProvider>().currentSong;
+    final songKey = song != null ? '${song.source}_${song.id}' : null;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
         width: size,
         height: size,
         child: cover != null && cover.isNotEmpty
-            ? CoverImage(url: cover, placeholder: _coverFallback(cs))
+            ? CoverImage(
+                url: cover,
+                songKey: songKey,
+                placeholder: _coverFallback(cs),
+              )
             : _coverFallback(cs),
       ),
     );
@@ -801,6 +809,7 @@ class _PlayerPageState extends State<PlayerPage>
 /// 复用封面区域高度，点击顶部"词"按钮后替代封面显示。
 class _LyricPanel extends StatefulWidget {
   final int songId;
+  final String? songKey;
   final double height;
 
   /// 歌词字号。窄屏默认 20；宽屏按列宽自适应传入更大值。
@@ -808,6 +817,7 @@ class _LyricPanel extends StatefulWidget {
 
   const _LyricPanel({
     required this.songId,
+    this.songKey,
     required this.height,
     this.fontSize = 20,
   });
@@ -849,7 +859,7 @@ class _LyricPanelState extends State<_LyricPanel> {
     setState(() => _loading = true);
     try {
       final provider = _provider ??= LyricProvider(netease.api);
-      final lines = await provider.load(widget.songId);
+      final lines = await provider.load(widget.songId, songKey: widget.songKey);
       if (mounted) {
         setState(() {
           _lines = lines;

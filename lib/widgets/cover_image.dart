@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../core/audio_cache/cover_cache.dart';
+import '../models/song.dart';
+
 /// 网易云封面图：统一处理 CDN 的访问要求。
 ///
 /// 网易云图片 CDN 对缺浏览器 UA 的请求返回 403。实测：
@@ -10,19 +13,29 @@ import 'package:flutter/material.dart';
 ///   拒 403（引擎对 UA 处理不可控）；
 /// - 自己用 dart:io `HttpClient` + Chrome UA + Referer 直连 → 稳定 200。
 ///
-/// 故本组件自己下载字节（`Image.memory` 渲染），并做进程内 LRU 缓存：
-/// 1. `http://` 升级 `https://`（服务端 https 也可访问）；
+/// 故本组件自己下载字节（`Image.memory` 渲染），并做缓存：
+/// 1. `http://` 升 `https://`（服务端 https 也可访问）；
 /// 2. 追加 `User-Agent`(Chrome) + `Referer: https://music.163.com/`；
 /// 3. 失败兜底 [placeholder]。
+///
+/// 缓存策略：
+/// - 进程内 LRU（256 项），所有封面共享；
+/// - 磁盘缓存（`cache/<songKey>/cover.jpg`），仅当传入 [songKey] 时生效，
+///   app 重启后命中磁盘可跳过网络请求。
 class CoverImage extends StatefulWidget {
   final String url;
   final BoxFit fit;
   final Widget? placeholder;
+
+  /// 歌曲 key（`<source>_<songId>`），传入时启用磁盘缓存。
+  final String? songKey;
+
   const CoverImage({
     super.key,
     required this.url,
     this.fit = BoxFit.cover,
     this.placeholder,
+    this.songKey,
   });
 
   static const Map<String, String> cdnHeaders = {
@@ -41,18 +54,51 @@ class CoverImage extends StatefulWidget {
 
   /// 取封面字节：命中进程内缓存直接返回，否则按 CDN 要求下载并缓存。
   /// 失败返回 null。供取色等非渲染用途复用下载/缓存逻辑。
-  static Future<Uint8List?> fetchBytes(String? rawUrl) async {
+  ///
+  /// [songKey] 可选，传入时启用磁盘缓存（`cache/<songKey>/cover.jpg`）。
+  static Future<Uint8List?> fetchBytes(
+    String? rawUrl, {
+    String? songKey,
+  }) async {
     final fitted = normalize(rawUrl);
     if (fitted == null) return null;
-    final cached = CoverImageCache.instance.get(fitted);
-    if (cached != null) return cached;
+
+    // 1. 进程内缓存
+    final memCached = CoverImageCache.instance.get(fitted);
+    if (memCached != null) return memCached;
+
+    // 2. 磁盘缓存
+    if (songKey != null) {
+      try {
+        final file = await CoverCache.instance.read(songKey);
+        if (file != null) {
+          final bytes = await file.readAsBytes();
+          CoverImageCache.instance.put(fitted, bytes);
+          return bytes;
+        }
+      } catch (_) {}
+    }
+
+    // 3. 网络下载
     try {
       final bytes = await _download(fitted);
       CoverImageCache.instance.put(fitted, bytes);
+      // 写入磁盘缓存
+      if (songKey != null) {
+        CoverCache.instance.write(songKey, bytes);
+      }
       return bytes;
     } catch (_) {
       return null;
     }
+  }
+
+  /// 从歌曲取封面字节（自动提取 songKey 和 URL）。
+  static Future<Uint8List?> fetchBytesForSong(Song song) {
+    return fetchBytes(
+      song.coverFor(1000),
+      songKey: '${song.source}_${song.id}',
+    );
   }
 
   static Future<Uint8List> _download(String url) async {
@@ -90,14 +136,17 @@ class _CoverImageState extends State<CoverImage> {
   @override
   void didUpdateWidget(CoverImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
+    if (oldWidget.url != widget.url || oldWidget.songKey != widget.songKey) {
       _bytes = null;
       _load();
     }
   }
 
   Future<void> _load() async {
-    final bytes = await CoverImage.fetchBytes(widget.url);
+    final bytes = await CoverImage.fetchBytes(
+      widget.url,
+      songKey: widget.songKey,
+    );
     if (!mounted) return;
     if (bytes != null) {
       setState(() => _bytes = bytes);
