@@ -106,6 +106,12 @@ class ThemeProvider extends ChangeNotifier {
     }
   }
 
+  /// 强制从 SharedPreferences 重新载入（备份恢复后调用）。
+  Future<void> reload() async {
+    _initialized = false;
+    await init();
+  }
+
   Future<void> setThemeMode(ThemeMode mode) async {
     if (_themeMode == mode) return;
     _themeMode = mode;

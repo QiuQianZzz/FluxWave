@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../core/backup_service.dart';
 import '../providers/liked_songs_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/theme_provider.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/page_scroll_view.dart';
 import '../widgets/section_card.dart';
@@ -105,16 +106,16 @@ class _BackupPageState extends State<BackupPage> {
 
     // 执行导入
     setState(() => _importing = true);
-    // 在 await 前捕获 Provider 引用，避免 async gap 使用 context
-    // ignore: use_build_context_synchronously
     final settings = context.read<SettingsProvider>();
-    // ignore: use_build_context_synchronously
+    final theme = context.read<ThemeProvider>();
     final liked = context.read<LikedSongsProvider>();
     try {
       await BackupService.import(backupFile, items, strategy);
+      if (!mounted) return;
       // 重新加载 Provider 数据
       if (items.contains(BackupItem.settings)) {
         await settings.reload();
+        await theme.reload();
       }
       if (items.contains(BackupItem.likedSongs)) {
         liked.reload();

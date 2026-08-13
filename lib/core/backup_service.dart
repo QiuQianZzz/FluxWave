@@ -222,6 +222,7 @@ class BackupService {
         await prefs.setStringList(key, value.cast<String>());
       }
     }
+    AppLog.info('设置已导入: ${data.keys.length} 项', tag: 'backup');
   }
 
   static Future<void> _importPlaybackStats(
