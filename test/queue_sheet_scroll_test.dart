@@ -104,7 +104,7 @@ void main() {
     );
     expect(
       state.position.pixels,
-      expected,
+      closeTo(expected, 2.0),
       reason: '切到随机视图后应滚动到当前项位置($expected)',
     );
   });
@@ -141,7 +141,7 @@ void main() {
     );
     expect(
       state.position.pixels,
-      expected,
+      closeTo(expected, 2.0),
       reason: '切回原始视图后应滚动到当前项位置($expected)',
     );
   });

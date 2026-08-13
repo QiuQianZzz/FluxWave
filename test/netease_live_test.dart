@@ -1,3 +1,6 @@
+@Skip('Live API test - run manually with: flutter test test/netease_live_test.dart')
+library;
+
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';

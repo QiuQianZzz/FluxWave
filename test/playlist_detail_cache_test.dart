@@ -94,7 +94,7 @@ void main() {
     for (var i = 1; i <= PlaylistDetailCache.maxFiles + 2; i++) {
       await cache.write(i, _playlist(i, '歌单$i'), _tracks(i));
       // 每个文件保持独立 mtime 以便 LRU 稳定判断
-      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     expect(
       await cache.count(),
