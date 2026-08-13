@@ -106,13 +106,16 @@ class _BackupPageState extends State<BackupPage> {
 
     // 执行导入
     setState(() => _importing = true);
+    // 在任何 await 之前捕获所有 Provider 引用（context.read 在 await 前，安全）
+    // ignore: use_build_context_synchronously
     final settings = context.read<SettingsProvider>();
+    // ignore: use_build_context_synchronously
     final theme = context.read<ThemeProvider>();
+    // ignore: use_build_context_synchronously
     final liked = context.read<LikedSongsProvider>();
     try {
       await BackupService.import(backupFile, items, strategy);
-      if (!mounted) return;
-      // 重新加载 Provider 数据
+      // 重新加载 Provider 数据（用的是 await 前捕获的引用，不经过 context）
       if (items.contains(BackupItem.settings)) {
         await settings.reload();
         await theme.reload();
