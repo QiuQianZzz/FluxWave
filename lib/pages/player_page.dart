@@ -289,7 +289,7 @@ class _PlayerPageState extends State<PlayerPage>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            _buildCover(cs, song.coverFor(300), coverSize, 18),
+                            _buildCover(cs, song.coverFor(1000), coverSize, 18),
                             const SizedBox(height: 24),
                             Text(
                               song.name,
@@ -560,7 +560,7 @@ class _PlayerPageState extends State<PlayerPage>
                 top: coverTop,
                 child: _buildCover(
                   cs,
-                  song.coverFor(300),
+                  song.coverFor(1000),
                   coverSize,
                   coverRadius,
                 ),
