@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: coverage/
+          if-no-files-found: ignore
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: analyze-and-test
+    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxwave-android
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: analyze-and-test
+    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxwave-windows
+          path: build/windows/x64/runner/Release/
+          retention-days: 7

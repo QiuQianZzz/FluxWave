@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不含 v 前缀），如 0.2.0'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: windows-x64
+          - arch: arm64
+            platform: windows-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Parse tag
+        id: tag
+        shell: powershell
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          if (-not $version) { $version = "${{ github.ref_name }}" -replace '^v', '' }
+          $cleanVersion = $version -replace '[-+].*$', ''
+          "version=$version" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+          "clean_version=$cleanVersion" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+
+      - name: Sync pubspec version
+        shell: powershell
+        run: |
+          (Get-Content pubspec.yaml) -replace '^version: .*', "version: ${{ steps.tag.outputs.version }}+1" |
+            Set-Content pubspec.yaml
+
+      - name: Build Windows ${{ matrix.arch }}
+        run: flutter build windows --release --target-platform ${{ matrix.platform }}
+
+      - name: Package zip
+        shell: powershell
+        run: |
+          $zip = "fluxwave-${{ steps.tag.outputs.version }}-windows-${{ matrix.arch }}.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath $zip
+
+      - name: Install Inno Setup 7
+        shell: powershell
+        run: |
+          $installer = "inno-setup7-x64.exe"
+          Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-7_0_2/innosetup-7.0.2-x64.exe" -OutFile $installer
+          Start-Process -FilePath ".\$installer" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+          Remove-Item $installer
+
+      - name: Build installer
+        shell: powershell
+        run: |
+          $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          & $iscc /DMyAppVersion=${{ steps.tag.outputs.clean_version }} `
+              /DMyAppVersionFile=${{ steps.tag.outputs.version }} `
+              /DArchSuffix=${{ matrix.arch }} `
+              windows\packaging\inno_setup.iss
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: |
+            fluxwave-*-windows-${{ matrix.arch }}.zip
+            dist/*.exe
+
+  build-android:
+    name: Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Parse tag
+        id: tag
+        shell: bash
+        run: |
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Sync pubspec version
+        run: |
+          sed -i "s/^version: .*/version: ${{ steps.tag.outputs.version }}+1/" pubspec.yaml
+
+      - name: Build split APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build universal APK
+        run: flutter build apk --release
+
+      - name: Rename APKs
+        run: |
+          cd build/app/outputs/flutter-apk
+          for f in app-*-release.apk; do
+            abi=$(echo "$f" | sed 's/app-//;s/-release.apk//')
+            mv "$f" "fluxwave-${{ steps.tag.outputs.version }}-android-${abi}.apk"
+          done
+          mv app-release.apk "fluxwave-${{ steps.tag.outputs.version }}-android-universal.apk"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: build/app/outputs/flutter-apk/fluxwave-*.apk
+
+  release:
+    name: Create Release
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Parse tag
+        id: tag
+        run: |
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then version="${GITHUB_REF_NAME#v}"; fi
+          is_prerelease="false"
+          if echo "$version" | grep -qE '(-beta|-rc|-alpha)'; then is_prerelease="true"; fi
+          previous_tag=$(git tag --sort=-creatordate -l 'v*' | grep -v "^${GITHUB_REF_NAME}$" | head -n 1 || true)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+          TARGET_SHA: ${{ github.sha }}
+          PREVIOUS_TAG: ${{ steps.tag.outputs.previous_tag }}
+        run: |
+          set -euo pipefail
+
+          # GitHub API 生成 PR 维度的 changelog
+          api_args=(
+            --method POST
+            "repos/${REPO}/releases/generate-notes"
+            -f "tag_name=${TAG_NAME}"
+            -f "target_commitish=${TARGET_SHA}"
+          )
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            api_args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
+          fi
+          gh api "${api_args[@]}" --jq '.body' > release-notes.md
+
+          # 追加 commit 哈希列表
+          {
+            echo
+            echo
+            echo "## Commits"
+            if [ -n "${PREVIOUS_TAG}" ]; then
+              git log --first-parent --pretty='- %h %s' "${PREVIOUS_TAG}..HEAD"
+            else
+              git log --first-parent --pretty='- %h %s'
+            fi
+          } >> release-notes.md
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.tag.outputs.version }}"
+          files: artifacts/**/*
+          body_path: release-notes.md
+          prerelease: ${{ steps.tag.outputs.is_prerelease == 'true' }}
