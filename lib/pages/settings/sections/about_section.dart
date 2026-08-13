@@ -91,8 +91,13 @@ class AboutSection extends StatelessWidget {
               checkUpdateOnStart: context.select<SettingsProvider, bool>(
                 (s) => s.checkUpdateOnStart,
               ),
+              updateChannel: context.select<SettingsProvider, String>(
+                (s) => s.updateChannel,
+              ),
               onToggleAutoCheck: (v) =>
                   context.read<SettingsProvider>().setCheckUpdateOnStart(v),
+              onChannelChanged: (v) =>
+                  context.read<SettingsProvider>().setUpdateChannel(v),
             ),
           ],
         ),
@@ -222,16 +227,20 @@ class _LogEntryTile extends StatelessWidget {
   }
 }
 
-/// 更新栏目：手动检查按钮 + 启动时自动检查开关。
+/// 更新栏目：手动检查按钮 + 启动时自动检查开关 + 更新渠道选择。
 ///
 /// 整合为一个连贯的列表项，避免按钮和开关分离显得松散。
 class _UpdateTile extends StatefulWidget {
   final bool checkUpdateOnStart;
+  final String updateChannel;
   final ValueChanged<bool> onToggleAutoCheck;
+  final ValueChanged<String> onChannelChanged;
 
   const _UpdateTile({
     required this.checkUpdateOnStart,
+    required this.updateChannel,
     required this.onToggleAutoCheck,
+    required this.onChannelChanged,
   });
 
   @override
@@ -245,7 +254,10 @@ class _UpdateTileState extends State<_UpdateTile> {
     if (_checking) return;
     setState(() => _checking = true);
     try {
-      final info = await UpdateService.instance.check();
+      final settings = context.read<SettingsProvider>();
+      final info = await UpdateService.instance.check(
+        includeBeta: settings.updateIncludeBeta,
+      );
       if (!mounted) return;
       if (info != null) {
         await UpdateDialog.show(context, info);
@@ -300,6 +312,39 @@ class _UpdateTileState extends State<_UpdateTile> {
           ),
           value: widget.checkUpdateOnStart,
           onChanged: widget.onToggleAutoCheck,
+        ),
+        const Divider(height: 1),
+        // 更新渠道
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('更新渠道'),
+          subtitle: Text(
+            widget.updateChannel == 'beta'
+                ? '接收所有版本（含内测版）'
+                : '仅接收正式版',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          trailing: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(
+                value: 'stable',
+                label: Text('正式版'),
+              ),
+              ButtonSegment(
+                value: 'beta',
+                label: Text('内测版'),
+              ),
+            ],
+            selected: {widget.updateChannel},
+            onSelectionChanged: (v) => widget.onChannelChanged(v.first),
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
         ),
       ],
     );

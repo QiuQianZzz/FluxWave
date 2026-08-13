@@ -16,16 +16,23 @@ class UpdateService {
 
   static const _owner = 'QiuQianZzz';
   static const _repo = 'FluxWave';
-  static const _apiUrl =
+  static const _latestUrl =
       'https://api.github.com/repos/$_owner/$_repo/releases/latest';
+  static const _releasesUrl =
+      'https://api.github.com/repos/$_owner/$_repo/releases';
 
   /// 检查是否有新版本。返回 null 表示已是最新或检查失败。
-  Future<UpdateInfo?> check() async {
+  ///
+  /// [includeBeta] 为 true 时检查所有 release（含预发布），
+  /// 为 false 时只检查正式版。
+  Future<UpdateInfo?> check({bool includeBeta = false}) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
 
-      final release = await _fetchLatestRelease();
+      final release = includeBeta
+          ? await _fetchLatestIncludingPrerelease()
+          : await _fetchLatestStable();
       if (release == null) return null;
 
       final latestVersion = _normalizeVersion(release.tagName);
@@ -48,11 +55,11 @@ class UpdateService {
     }
   }
 
-  /// 获取最新 release 信息。
-  Future<_GitHubRelease?> _fetchLatestRelease() async {
+  /// 获取最新正式版 release。
+  Future<_GitHubRelease?> _fetchLatestStable() async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
     try {
-      final request = await client.getUrl(Uri.parse(_apiUrl));
+      final request = await client.getUrl(Uri.parse(_latestUrl));
       request.headers.set('Accept', 'application/vnd.github.v3+json');
       request.headers.set('User-Agent', 'FluxWave/1.0');
       final response = await request.close();
@@ -60,6 +67,26 @@ class UpdateService {
       final body = await response.transform(utf8.decoder).join();
       final json = jsonDecode(body) as Map<String, dynamic>;
       return _GitHubRelease.fromJson(json);
+    } finally {
+      client.close();
+    }
+  }
+
+  /// 获取最新 release（含预发布）：拉取最近 10 条，取第一条。
+  Future<_GitHubRelease?> _fetchLatestIncludingPrerelease() async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final request = await client.getUrl(
+        Uri.parse('$_releasesUrl?per_page=10'),
+      );
+      request.headers.set('Accept', 'application/vnd.github.v3+json');
+      request.headers.set('User-Agent', 'FluxWave/1.0');
+      final response = await request.close();
+      if (response.statusCode != 200) return null;
+      final body = await response.transform(utf8.decoder).join();
+      final list = jsonDecode(body) as List;
+      if (list.isEmpty) return null;
+      return _GitHubRelease.fromJson(list.first as Map<String, dynamic>);
     } finally {
       client.close();
     }

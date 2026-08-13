@@ -165,7 +165,10 @@ class _MainScaffoldState extends State<MainScaffold> {
   /// 启动时检查更新：静默检查，有更新弹窗，无更新不提示。
   Future<void> _checkUpdate() async {
     try {
-      final info = await UpdateService.instance.check();
+      final settings = context.read<SettingsProvider>();
+      final info = await UpdateService.instance.check(
+        includeBeta: settings.updateIncludeBeta,
+      );
       if (!mounted || info == null) return;
       await UpdateDialog.show(context, info);
     } catch (_) {

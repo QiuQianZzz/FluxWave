@@ -26,6 +26,7 @@ class SettingsProvider extends ChangeNotifier {
   static const _kLyricDepthBlur = 'lyric_depth_blur';
   static const _kGlassBlur = 'glass_blur';
   static const _kCheckUpdateOnStart = 'check_update_on_start';
+  static const _kUpdateChannel = 'update_channel';
 
   /// 音质档位表（值 = 网易云 song/url v1 的 level 参数，label = 展示名）。
   /// 标准→较高→...→超清母带。
@@ -85,6 +86,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 启动时检查更新（默认开）。
   bool _checkUpdateOnStart = true;
 
+  /// 更新渠道：stable = 仅正式版，beta = 包含内测版（默认）。
+  String _updateChannel = 'beta';
+
   bool get initialized => _initialized;
 
   /// 触感反馈开关（tab 切换等交互触发震动），默认开。
@@ -127,6 +131,12 @@ class SettingsProvider extends ChangeNotifier {
   /// 启动时检查更新。
   bool get checkUpdateOnStart => _checkUpdateOnStart;
 
+  /// 更新渠道：stable = 仅正式版，beta = 包含内测版。
+  String get updateChannel => _updateChannel;
+
+  /// 是否包含内测版更新。
+  bool get updateIncludeBeta => _updateChannel == 'beta';
+
   /// 生效的 IP 注入开关：Android 硬门控（永不自动注入）。
   /// 显式 [NeteaseRequestContext.realIp] 仍恒生效（开发者/调试意图，不受此门控）。
   bool get realIpInjectionEnabled => _neteaseRealIp && !isAndroid;
@@ -163,6 +173,7 @@ class SettingsProvider extends ChangeNotifier {
       _lyricDepthBlur = prefs.getBool(_kLyricDepthBlur) ?? true;
       _glassBlur = prefs.getBool(_kGlassBlur) ?? true;
       _checkUpdateOnStart = prefs.getBool(_kCheckUpdateOnStart) ?? true;
+      _updateChannel = prefs.getString(_kUpdateChannel) ?? 'beta';
     } catch (_) {
       // 读取失败使用默认值
     }
@@ -277,6 +288,15 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kCheckUpdateOnStart, v);
+  }
+
+  /// 切换更新渠道（持久化）。'stable' = 仅正式版，'beta' = 包含内测版。
+  Future<void> setUpdateChannel(String v) async {
+    if (v == _updateChannel) return;
+    _updateChannel = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kUpdateChannel, v);
   }
 
   /// 桌面图标 id（持久化）。仅记录用户选择；实际调用 LauncherIconSwitcher
