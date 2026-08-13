@@ -186,6 +186,12 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 强制从 SharedPreferences 重新载入（备份恢复后调用）。
+  Future<void> reload() async {
+    _initialized = false;
+    await init();
+  }
+
   void _apply() {
     NeteaseConfig.enableRealIpInjection = realIpInjectionEnabled;
     NeteaseConfig.bypassSystemProxy = _bypassSystemProxy;

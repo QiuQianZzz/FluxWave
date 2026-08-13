@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/platform_utils.dart';
 import '../../widgets/collapsing_title.dart';
 import '../../widgets/page_scroll_view.dart';
+import '../backup_page.dart';
 import 'sections/about_section.dart';
 import 'sections/account_section.dart';
 import 'sections/network_section.dart';
@@ -304,6 +305,12 @@ const _kEntries = <SettingsEntry>[
     title: '网络与风控',
     subtitle: 'IP 注入、系统代理',
     builder: NetworkSection.builder,
+  ),
+  SettingsEntry(
+    icon: Icons.backup_outlined,
+    title: '备份与恢复',
+    subtitle: '导出/导入用户数据',
+    builder: BackupPage.builder,
   ),
   SettingsEntry(
     icon: Icons.person_outline_rounded,

@@ -60,6 +60,13 @@ class LikedSongsProvider extends ChangeNotifier {
     }
   }
 
+  /// 强制从磁盘重新载入（备份恢复后调用）。
+  Future<void> reload() async {
+    _loaded = false;
+    _loading = false;
+    await load();
+  }
+
   /// 快速判断某首歌是否已收藏。
   bool isLiked(Song song) => _byKey.containsKey(keyOf(song));
 
