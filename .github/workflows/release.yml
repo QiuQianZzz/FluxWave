@@ -48,7 +48,7 @@ jobs:
       - name: Sync pubspec version
         shell: powershell
         run: |
-          (Get-Content pubspec.yaml) -replace '^version: .*', "version: ${{ steps.tag.outputs.version }}+1" |
+          (Get-Content pubspec.yaml) -replace '^version: \K[^+]+', '${{ steps.tag.outputs.version }}' |
             Set-Content pubspec.yaml
 
       - name: Build Windows Release
@@ -131,7 +131,8 @@ jobs:
 
       - name: Sync pubspec version
         run: |
-          sed -i "s/^version: .*/version: ${{ steps.tag.outputs.version }}+1/" pubspec.yaml
+          build_num=$(grep -oP 'version: .*\+\K\d+' pubspec.yaml)
+          sed -i "s/^version: .*/version: ${{ steps.tag.outputs.version }}+${build_num}/" pubspec.yaml
 
       - name: Decode keystore
         if: env.KEYSTORE_BASE64 != ''
