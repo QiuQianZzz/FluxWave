@@ -313,5 +313,44 @@ void main() {
       // 空/失败结果未缓存 → 第二次重新请求（配合断网恢复后歌词重试）。
       expect(calls, 2);
     });
+
+    test('确定性无歌词（code==200 无文本）缓存：再次 load 不重新请求', () async {
+      var calls = 0;
+      final provider = makeProvider((_) async {
+        calls++;
+        return {
+          'code': 200,
+          'lrc': {'lyric': null},
+        };
+      });
+      final first = await provider.load(1);
+      expect(first, isEmpty);
+      // 二次 load 命中空哨兵缓存：不再发网络请求。
+      final second = await provider.load(1);
+      expect(second, isEmpty);
+      expect(calls, 1);
+    });
+
+    test('确定性无歌词与接口异常空可区分：后者仍可重试', () async {
+      var calls = 0;
+      final provider = makeProvider((_) async {
+        calls++;
+        // 第一次 code==200 无歌词（确定性），第二次接口异常 code!=200。
+        if (calls == 1) {
+          return {
+            'code': 200,
+            'lrc': {'lyric': null},
+          };
+        }
+        return {'code': 500};
+      });
+      final first = await provider.load(1);
+      expect(first, isEmpty);
+      // 确定性空已缓存，但 invalidate 后 code!=200 的异常空不缓存，可重试。
+      provider.invalidate(1);
+      final second = await provider.load(1);
+      expect(second, isEmpty);
+      expect(calls, 2);
+    });
   });
 }

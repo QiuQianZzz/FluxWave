@@ -93,12 +93,18 @@ class AppAudioHandler extends BaseAudioHandler
     _emitMediaItem(seq, song, known);
     if (coverUrl == null || coverUrl.isEmpty) return;
     // 阶段 2：后台解析真实封面（内存/磁盘/网络），更好则重发。
-    final bytes = await CoverImage.fetchBytes(coverUrl, songKey: songKey);
-    if (bytes == null || seq != _artworkSeq) return;
-    final uri = await _writeCoverFile(bytes, songKey);
-    if (seq != _artworkSeq) return;
-    _coverUris[songKey] = uri;
-    if (uri != known) _emitMediaItem(seq, song, uri);
+    // 整体包进 try/catch：文件写入/路径解析等任何异常都静默降级到阶段 1
+    // 已下发的占位图，而非向调用方抛未处理异步异常（本方法是 unawaited 调用）。
+    try {
+      final bytes = await CoverImage.fetchBytes(coverUrl, songKey: songKey);
+      if (bytes == null || seq != _artworkSeq) return;
+      final uri = await _writeCoverFile(bytes, songKey);
+      if (seq != _artworkSeq) return;
+      _coverUris[songKey] = uri;
+      if (uri != known) _emitMediaItem(seq, song, uri);
+    } catch (_) {
+      // 封面解析失败：通知栏已显示阶段 1 的占位图，静默降级。
+    }
   }
 
   /// 下发媒体项：token 校验防旧请求覆盖新歌 + 去重相同项。

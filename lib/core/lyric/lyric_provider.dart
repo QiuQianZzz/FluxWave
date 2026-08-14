@@ -20,9 +20,19 @@ class LyricProvider {
   final Future<Map<String, dynamic>> Function(int songId) _fetchLyric;
 
   // 进程内缓存：songId → 解析后的歌词。容量 40。
+  // 值域有两类：非空歌词列表 = 已成功加载；[_noLyrics] 哨兵 = 已确认该歌
+  // 无歌词（code==200 但无歌词文本），命中直接返回空，不再发网络请求。
   static const _kCacheLimit = 40;
   final _cache = <int, List<LyricLine>>{};
   final _loading = <int, Future<List<LyricLine>>>{};
+
+  /// 确定性无歌词哨兵：接口正常（code==200）但无歌词文本。
+  ///
+  /// 与「加载失败」（抛异常、不缓存、可重试）和「接口异常返回空」
+  /// （code != 200，同样不缓存）严格区分。用 `List.unmodifiable(const [])`
+  /// 而非 `const []`：后者是常量规范化的单例，无法与普通空列表做
+  /// `identical` 区分。
+  static final List<LyricLine> _noLyrics = List.unmodifiable(const []);
 
   LyricProvider(NeteaseApi api) : _fetchLyric = api.lyric;
 
@@ -33,6 +43,12 @@ class LyricProvider {
   /// 加载歌词。命中缓存立即返回；并发请求同一 songId 时共享同一个 Future。
   ///
   /// [songKey] 可选（`<source>_<songId>`），传入时启用磁盘缓存。
+  ///
+  /// 缓存策略（断网失败结果不缓存，可重试）：
+  /// - 成功：非空歌词 → 缓存；
+  /// - 确定性无歌词（code==200 但无文本）→ 缓存空哨兵，命中直接返回空，
+  ///   避免对无歌词歌曲每次播放都重新请求；
+  /// - 失败（网络/接口异常、code != 200）→ 返回空但不缓存，重试重新请求。
   Future<List<LyricLine>> load(int songId, {String? songKey}) async {
     final cached = _cache[songId];
     if (cached != null) return cached;
@@ -44,10 +60,12 @@ class LyricProvider {
     _loading[songId] = fut;
     try {
       final lines = await fut;
-      // 只缓存有内容的成功结果：空列表（真无歌词/失败）不缓存，否则断网
-      // 失败返回的空结果会被永久缓存，后续任何重载都直接命中缓存返回空，
-      // 表现为「切歌回来仍是暂无歌词」。
-      if (lines.isNotEmpty) _putCache(songId, lines);
+      if (lines.isNotEmpty) {
+        _putCache(songId, lines);
+      } else if (identical(lines, _noLyrics)) {
+        // 确定性无歌词：缓存哨兵，下次 load 直接命中、不再请求。
+        _putCache(songId, _noLyrics);
+      }
       return lines;
     } finally {
       _loading.remove(songId);
@@ -91,11 +109,13 @@ class LyricProvider {
     final yrc = _extractLyricText(body, 'yrc');
     final lrc = _extractLyricText(body, 'lrc');
     final mainText = yrc.isNotEmpty ? yrc : lrc;
-    if (mainText.isEmpty) return const [];
+    // code==200 但无歌词文本 → 确定性无歌词（哨兵，可缓存）。
+    if (mainText.isEmpty) return _noLyrics;
 
     // 解析主歌词
     final mainLines = LyricParser.parseAuto(mainText);
-    if (mainLines.isEmpty) return const [];
+    // 有文本但解析不出任何行 → 视为确定性无歌词（哨兵，可缓存）。
+    if (mainLines.isEmpty) return _noLyrics;
 
     // 翻译：ytlrc 优先，回退 tlyric
     final transText = _extractLyricText(body, 'ytlrc').isNotEmpty
