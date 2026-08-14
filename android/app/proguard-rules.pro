@@ -2,7 +2,6 @@
 -keep class com.ryanheise.audioservice.** { *; }
 
 # 保留 AndroidX media-compat 的 MediaBrowserServiceCompat 及内部回调
--keep class android.support.v4.media.** { *; }
 -keep class androidx.media.** { *; }
 
 # 保留所有 R 子类及其字段（资源 ID），getIdentifier 反射回退依赖
