@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 
@@ -96,8 +98,14 @@ class MediaSessionManager {
   }
 
   /// 更新当前媒体信息。
+  ///
+  /// 封面在 handler 内异步解析（见 [AppAudioHandler.setMediaItem]），此调用
+  /// 立即返回，不阻塞播放管线。
   void updateMediaItem(Song song, {String? coverUrl}) {
-    _handler?.setMediaItem(song, coverUrl: coverUrl);
+    final handler = _handler;
+    if (handler != null) {
+      unawaited(handler.setMediaItem(song, coverUrl: coverUrl));
+    }
   }
 
   /// 更新播放状态。

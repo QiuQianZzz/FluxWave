@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:audio_service/audio_service.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../models/song.dart';
+import '../../widgets/cover_image.dart';
 
 /// 应用级媒体会话处理器。
 ///
@@ -54,29 +59,109 @@ class AppAudioHandler extends BaseAudioHandler
   /// 当前歌曲是否已收藏（决定通知栏收藏按钮空心/实心图标）。
   bool _favorite = false;
 
+  /// 封面解析序号：并发请求只让最新一次生效，防止旧请求的慢解析覆盖新歌封面。
+  int _artworkSeq = 0;
+
+  /// 已解析出的封面文件 URI：songKey → `file://` URI。命中后同一首歌再次
+  /// 下发时直接复用（不闪占位图），也避免重复下载/重写临时文件。
+  final Map<String, Uri> _coverUris = {};
+
+  /// 占位图临时文件 URI（惰性写入一次，缓存复用）。
+  Future<Uri?>? _placeholderUriFuture;
+
+  /// 封面临时文件基目录（`<temp>/fluxwave_artwork/`）。
+  Future<String>? _artworkDirFuture;
+
   /// 设置当前媒体信息（歌曲标题、歌手、封面、时长）。
   ///
-  /// 内部去重：相同的媒体信息不会重复发送。
-  void setMediaItem(Song song, {String? coverUrl}) {
+  /// 封面不直接传 CDN URL：那会让原生加载器在断网/无缓存时拉取失败（且其请求
+  /// 不带网易云 CDN 要求的 Referer/UA，联网也未必拉得到）。改为自行解析字节
+  /// （复用 [CoverImage] 的下载与内存/磁盘缓存）后写临时文件，以 `file://` 交给
+  /// 通知栏，从而覆盖三种场景：
+  /// - 在线：下载封面 → 显示封面；
+  /// - 离线但有缓存：磁盘缓存字节 → 同样显示封面；
+  /// - 离线且无缓存：占位图兜底。
+  ///
+  /// 分两阶段下发：先立即用「已知封面或占位图」出一版（标题/歌手即时更新），
+  /// 封面解析完成后再重发真实封面。断网→重连后，重发时的封面 `file://` URI
+  /// 与占位图不同，会绕过 [_lastMediaItem] 去重，通知栏自动恢复正确封面。
+  Future<void> setMediaItem(Song song, {String? coverUrl}) async {
+    final seq = ++_artworkSeq;
+    final songKey = '${song.source}_${song.id}';
+    // 阶段 1：立即下发，保证标题/歌手即时更新。
+    final known = _coverUris[songKey] ?? await _placeholderUri();
+    _emitMediaItem(seq, song, known);
+    if (coverUrl == null || coverUrl.isEmpty) return;
+    // 阶段 2：后台解析真实封面（内存/磁盘/网络），更好则重发。
+    final bytes = await CoverImage.fetchBytes(coverUrl, songKey: songKey);
+    if (bytes == null || seq != _artworkSeq) return;
+    final uri = await _writeCoverFile(bytes, songKey);
+    if (seq != _artworkSeq) return;
+    _coverUris[songKey] = uri;
+    if (uri != known) _emitMediaItem(seq, song, uri);
+  }
+
+  /// 下发媒体项：token 校验防旧请求覆盖新歌 + 去重相同项。
+  void _emitMediaItem(int seq, Song song, Uri? artUri) {
+    if (seq != _artworkSeq) return;
     final item = MediaItem(
       id: '${song.source}_${song.id}',
       title: song.name,
       artist: song.artists.isNotEmpty ? song.artists.join(' / ') : null,
       album: song.albumName,
       duration: Duration(milliseconds: song.durationMs),
-      artUri: coverUrl != null ? Uri.tryParse(coverUrl) : null,
+      artUri: artUri,
     );
-
-    // 去重：相同的歌曲信息不重复更新
     if (_lastMediaItem != null &&
         _lastMediaItem!.id == item.id &&
         _lastMediaItem!.title == item.title &&
         _lastMediaItem!.artUri == item.artUri) {
       return;
     }
-
     _lastMediaItem = item;
     mediaItem.add(item);
+  }
+
+  /// 占位图临时文件 URI：从资源包读一次、写临时文件一次，之后复用。
+  /// 写入失败（异常场景）返回 null，通知栏显示默认图标。
+  Future<Uri?> _placeholderUri() {
+    return _placeholderUriFuture ??= _ensurePlaceholderFile();
+  }
+
+  Future<Uri?> _ensurePlaceholderFile() async {
+    try {
+      final dir = await _artworkDir();
+      final file = File('$dir/placeholder.png');
+      if (!await file.exists()) {
+        final data = await rootBundle.load('assets/placeholder_cover.png');
+        await file.create(recursive: true);
+        await file.writeAsBytes(
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+          flush: true,
+        );
+      }
+      return Uri.file(file.path);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 将封面字节写入临时文件（同名覆盖，不重复写），返回 `file://` URI。
+  Future<Uri> _writeCoverFile(Uint8List bytes, String songKey) async {
+    final dir = await _artworkDir();
+    final file = File('$dir/cover_$songKey.jpg');
+    if (!await file.exists()) {
+      await file.create(recursive: true);
+      await file.writeAsBytes(bytes, flush: true);
+    }
+    return Uri.file(file.path);
+  }
+
+  Future<String> _artworkDir() {
+    return _artworkDirFuture ??= () async {
+      final temp = await getTemporaryDirectory();
+      return '${temp.path}/fluxwave_artwork';
+    }();
   }
 
   /// 更新播放状态（播放/暂停/进度/缓冲等）。

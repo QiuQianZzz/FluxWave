@@ -126,6 +126,8 @@ flutter:
     # 应用图标切换的预览图（lib/core/app_icon.dart 定义）。新增图标只需放入
     # assets/icon/previews/，无需改本声明。
     - assets/icon/previews/
+    # 通知栏封面占位图（无封面字节可用时展示，见 AppAudioHandler）。
+    - assets/placeholder_cover.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
