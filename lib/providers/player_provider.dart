@@ -142,6 +142,9 @@ class PlayerProvider extends ChangeNotifier {
   Object? _error;
   bool _isTrial = false;
 
+  /// 流式播放中断自动恢复：连续失败计数，播放成功启动时清零（见 _setUrl）。
+  int _streamRecoverStreak = 0;
+
   /// 网络瞬时故障（断网/DNS/超时/TLS）退避重试后的长周期兜底重试定时器。
   ///
   /// 短退避重试在 `_loadCurrentInternal` 内同步完成；全部耗尽仍失败时，
@@ -480,6 +483,8 @@ class PlayerProvider extends ChangeNotifier {
     // 播放/暂停状态变化 → 刷新 MiniPlayer 按钮（低频，无位置流风暴），
     // 同时落盘快照（playing 状态是快照的一部分）。
     _subs.add(_player.playerStateStream.listen(_onPlayerState));
+    // 播放中断（网络切换掐断回源流 / 连接被重置）：自动断点续播，不中断体验。
+    _subs.add(_player.errorStream.listen(_onPlayerError));
     // 进度：更新当前进度，按间隔节流落盘。
     _subs.add(_player.positionStream.listen(_onPosition));
     // 一首播完自动切下一首；无下一首则停止。
@@ -595,6 +600,91 @@ class PlayerProvider extends ChangeNotifier {
     _setUiPlaying(false);
     _accumulateListenMs();
   }
+
+  /// 播放中断自动恢复（errorStream 回调）。
+  ///
+  /// 触发场景：播放中底层音频流被网络切换/回源连接被掐断等瞬时故障中断
+  /// （just_audio 报 `PlayerException`，Android 上 code 映射 Media3
+  /// `PlaybackException.errorCode`，网络类为 2000xxx）。
+  ///
+  /// 只处理「播放中」的中断：
+  /// - 加载期（_loadCurrent 内部）的错误已被 setUrl 的 try/catch + 跳过链处理，
+  ///   不应在此重复介入（否则会与跳过/降级逻辑竞争）。
+  /// - 仅当是可恢复的网络/IO 错误才续播；格式/解码类错误不可恢复，仍走
+  ///   原有的错误展示/跳过路径。
+  void _onPlayerError(Object e) {
+    // 加载中/用户暂停/恢复会话期间不介入：这些路径有自己的错误处理。
+    if (_loadInProgress || _userPaused || _restoring) return;
+    if (e is! PlayerException) return;
+    final song = currentSong;
+    if (song == null) return;
+    if (!_isRecoverableStreamError(e)) return;
+    // 已在正常播放（playing=true）的迟到错误事件：说明错误已被跳过链等
+    // 路径处理掉，当前正在播下一首/重试成功的歌，不应打断。真正的播放中断
+    // 会让 ExoPlayer 进入 idle，playing 必为 false。
+    if (_player.playing) return;
+    // 跳过链已停止（连续失败/无下一首，_skipStopReason 非空）：迟到错误
+    // 不应再触发恢复，避免把已停止的播放重新拉起。
+    if (_skipStopReason != null) return;
+    // 网络缓冲期（loading/buffering）的失败已由 _loadCurrent 网络重试兜底，
+    // 不重复恢复。
+    if (_player.processingState == ProcessingState.buffering ||
+        _player.processingState == ProcessingState.loading) {
+      return;
+    }
+    // 记录断点：错误发生时 player.position 可能已回落到 0（idle），用
+    // _currentProgressMs（positionStream 持续维护的真实进度）作为续播位置。
+    final resumeMs = _currentProgressMs;
+    // 连续恢复失败退避：避免弱网下 errorStream 风暴反复触发恢复，最多
+    // [_streamRecoverMaxAttempts] 次。计数只在播放成功启动时重置（见
+    // _setUrl），窗口内不重置——「每次中断都尝试恢复」即连续失败，不应因
+    // 时间间隔而获得新的尝试额度。
+    _streamRecoverStreak++;
+    if (_streamRecoverStreak > _streamRecoverMaxAttempts) {
+      AppLog.warn(
+        '播放中断自动恢复次数过多，暂停自动续播：${song.name}',
+        tag: 'player',
+        error: e,
+      );
+      return;
+    }
+    AppLog.warn(
+      '播放中断，从 ${resumeMs}ms 自动续播：${song.name}',
+      tag: 'player',
+      error: e,
+    );
+    _buffering = true;
+    notifyListeners();
+    unawaited(_recoverFromInterruption(resumeMs));
+  }
+
+  /// 可恢复的流式播放错误：网络/IO 类（Android Media3 errorCode 2000xxx）。
+  ///
+  /// 参考 NeriPlayer 的 `shouldAttemptUrlRefresh`：网络连接失败/超时、HTTP
+  /// 状态错误属于瞬时故障，URL 失效可刷新重试；解析/解码/格式类错误不可恢复，
+  /// 重试也会复现，走原错误路径。
+  static bool _isRecoverableStreamError(PlayerException e) {
+    return isRecoverableStreamErrorCode(e.code);
+  }
+
+  /// 断点续播：保存进度 → 重新走加载链（重取 URL）→ seek 回中断位置。
+  ///
+  /// 复用 [_restoring] 语义：_loadCurrentInternal 在 _restoring=true 时不清零
+  /// _currentProgressMs，_setUrl 也会在 setUrl 后 seek 到该进度，实现无缝续播。
+  Future<void> _recoverFromInterruption(int resumeMs) async {
+    if (resumeMs > 0) {
+      _currentProgressMs = resumeMs;
+    }
+    _restoring = true;
+    try {
+      await _loadCurrent();
+    } finally {
+      _restoring = false;
+    }
+  }
+
+  /// 连续失败时最多自动恢复次数（之后停止自动续播，等待成功播放或用户操作）。
+  static const int _streamRecoverMaxAttempts = 3;
 
   /// 将当前播放会话的时长累加到 `_accumulatedListenMs`，然后清空会话起点。
   /// 暂停、停止、切歌时调用。
@@ -1695,6 +1785,9 @@ class PlayerProvider extends ChangeNotifier {
       _lastPlayStartTime = DateTime.now().millisecondsSinceEpoch;
       // 最近播放：播放真正启动即记录（去重顶到最前），无阈值。
       _recordRecentPlay(song);
+      // 播放成功启动：网络已恢复，重置流中断自动恢复的连续失败计数。
+      // 覆盖断点续播、网络自愈、普通重试三条路径的恢复成功场景。
+      _streamRecoverStreak = 0;
     }
     // _startPlayback 可能因 _userPaused=true 提前 return（没播起来），
     // 也可能重试后最终 playing=false（native bug）。但此时 Provider 内部状态
@@ -1941,6 +2034,30 @@ class PlayerProvider extends ChangeNotifier {
     _player.dispose();
     super.dispose();
   }
+}
+
+/// 判断 Media3 播放错误码是否为可恢复的网络/IO 类。
+///
+/// 参考 NeriPlayer 的 `shouldAttemptUrlRefresh`：网络连接失败/超时、HTTP 状态
+/// 错误属于瞬时故障，URL 失效可刷新重试；解析/解码/格式类错误不可恢复，重试
+/// 也会复现，走原错误路径。
+@visibleForTesting
+bool isRecoverableStreamErrorCode(int code) {
+  // code 未定义（<=0 或未知）：保守不恢复。
+  if (code <= 0) return false;
+  const recoverableCodes = <int>{
+    2000000, // ERROR_CODE_IO_UNSPECIFIED
+    2000001, // ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+    2000002, // ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+    2000003, // ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
+    2000004, // ERROR_CODE_IO_BAD_HTTP_STATUS
+    2000005, // ERROR_CODE_IO_FILE_NOT_FOUND
+    2000008, // ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
+  };
+  if (recoverableCodes.contains(code)) return true;
+  // 网络类错误码范围（Media3 2000000-2000008），其余（解析/解码/音频轨/
+  // DRM）不恢复。
+  return code >= 2000000 && code < 3000000;
 }
 
 /// 决定要交给播放器播的 URL（音频缓存路由）。

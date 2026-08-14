@@ -119,6 +119,44 @@ void main() {
     expect(player.skipCount, greaterThanOrEqualTo(1));
     expect(player.skipStopReason, 'overLimit');
   });
+
+  testWidgets('流中断错误分类：网络/IO 类可恢复，解析/解码类不可恢复', (tester) async {
+    // Media3 PlaybackException.errorCode（Android 上 just_audio
+    // PlayerException.code 映射此值）。
+    const networkCodes = [
+      2000000, // ERROR_CODE_IO_UNSPECIFIED
+      2000001, // ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+      2000002, // ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+      2000003, // ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
+      2000004, // ERROR_CODE_IO_BAD_HTTP_STATUS
+      2000005, // ERROR_CODE_IO_FILE_NOT_FOUND
+      2000008, // ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
+    ];
+    for (final code in networkCodes) {
+      expect(
+        isRecoverableStreamErrorCode(code),
+        isTrue,
+        reason: 'code=$code 应为可恢复网络/IO 错误',
+      );
+    }
+    // 解析/解码/DRM/未知：不可恢复。
+    const nonRecoverable = [
+      3000001, // ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED
+      3000003, // ERROR_CODE_PARSING_CONTAINER_MALFORMED
+      4000003, // ERROR_CODE_DECODING_FAILED
+      5000001, // ERROR_CODE_AUDIO_TRACK_INIT_FAILED
+      6000001, // ERROR_CODE_DRM_SCHEME_UNSUPPORTED
+      0, // 未定义/未知
+      -1,
+    ];
+    for (final code in nonRecoverable) {
+      expect(
+        isRecoverableStreamErrorCode(code),
+        isFalse,
+        reason: 'code=$code 不应视为可恢复网络/IO 错误',
+      );
+    }
+  });
 }
 
 /// 可注入 songUrl 实现的假 NeteaseApi。
