@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../core/backup_service.dart';
+import '../core/platform_utils.dart';
 import '../providers/liked_songs_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
@@ -38,17 +40,28 @@ class _BackupPageState extends State<BackupPage> {
     try {
       final file = await BackupService.export(_selected.toList());
       if (!mounted) return;
-      // 桌面端：弹保存对话框让用户选位置
-      final saveLocation = await getSaveLocation(
-        suggestedName: file.uri.pathSegments.last,
-        acceptedTypeGroups: [
-          XTypeGroup(label: '备份文件', extensions: ['json']),
-        ],
-      );
-      if (saveLocation == null) return; // 用户取消
-      await file.copy(saveLocation.path);
-      if (!mounted) return;
-      AppToast.show(context, '备份已保存');
+      // 移动端：file_selector 不提供保存对话框（getSaveLocation 未实现），
+      // 走系统分享面板由用户选择保存位置；桌面端弹系统保存对话框。
+      if (PlatformUtils.isMobile) {
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(file.path)],
+            subject: 'FluxWave 数据备份',
+            text: 'FluxWave 数据备份',
+          ),
+        );
+      } else {
+        final saveLocation = await getSaveLocation(
+          suggestedName: file.uri.pathSegments.last,
+          acceptedTypeGroups: [
+            XTypeGroup(label: '备份文件', extensions: ['json']),
+          ],
+        );
+        if (saveLocation == null) return; // 用户取消
+        await file.copy(saveLocation.path);
+        if (!mounted) return;
+        AppToast.show(context, '备份已保存');
+      }
     } catch (e) {
       if (!mounted) return;
       AppToast.show(context, '备份失败: $e');
