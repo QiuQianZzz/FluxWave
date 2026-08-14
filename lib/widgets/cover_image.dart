@@ -30,12 +30,17 @@ class CoverImage extends StatefulWidget {
   /// 歌曲 key（`<source>_<songId>`），传入时启用磁盘缓存。
   final String? songKey;
 
+  /// 内容重载信号：变化且当前无字节（上次加载失败，如断网）时重新尝试
+  /// 下载。配合 [PlayerProvider.contentTick] 在自愈续播成功后重试封面。
+  final int? reloadToken;
+
   const CoverImage({
     super.key,
     required this.url,
     this.fit = BoxFit.cover,
     this.placeholder,
     this.songKey,
+    this.reloadToken,
   });
 
   static const Map<String, String> cdnHeaders = {
@@ -136,7 +141,15 @@ class _CoverImageState extends State<CoverImage> {
   @override
   void didUpdateWidget(CoverImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url || oldWidget.songKey != widget.songKey) {
+    // 上次加载失败（_bytes == null）且收到新的重载信号时重新尝试下载。
+    // url/songKey 变化仍走原有重载路径。
+    final reloadRequested =
+        widget.reloadToken != null &&
+        oldWidget.reloadToken != widget.reloadToken &&
+        _bytes == null;
+    if (oldWidget.url != widget.url ||
+        oldWidget.songKey != widget.songKey ||
+        reloadRequested) {
       _bytes = null;
       _load();
     }

@@ -145,6 +145,12 @@ class PlayerProvider extends ChangeNotifier {
   /// 流式播放中断自动恢复：连续失败计数，播放成功启动时清零（见 _setUrl）。
   int _streamRecoverStreak = 0;
 
+  /// 内容重载信号：每次歌曲真正启动播放时自增。
+  ///
+  /// UI（封面/歌词）在加载失败（如断网）后监听此值：网络恢复、自愈成功
+  /// 续播当前曲时值变化，触发重新加载此前失败的封面/歌词。
+  int _contentTick = 0;
+
   /// 网络瞬时故障（断网/DNS/超时/TLS）退避重试后的长周期兜底重试定时器。
   ///
   /// 短退避重试在 `_loadCurrentInternal` 内同步完成；全部耗尽仍失败时，
@@ -401,6 +407,10 @@ class PlayerProvider extends ChangeNotifier {
   String? get currentType => _currentType;
 
   bool get playing => _uiPlaying;
+
+  /// 内容重载信号计数（见 [_contentTick]）：播放真正启动一次 +1。
+  /// UI 用它做封面/歌词的失败重试触发。
+  int get contentTick => _contentTick;
 
   // 边界语义：
   // 列表/单曲循环下恒可切（回绕）；「不循环」下队尾无下一首、队首无上一首。
@@ -1560,6 +1570,20 @@ class PlayerProvider extends ChangeNotifier {
         final isNetworkFailure = fetchError is NeteaseException &&
             fetchError.isNetwork;
         if (isNetworkFailure && networkAttempts < networkRetryAttempts) {
+          // 网络请求已失败：首轮立即暂停旧曲，避免退避重试期间（最长可达
+          // 十几秒）旧歌仍在播放，造成「UI 已切新歌/加载中、底层还在播旧歌」
+          // 的错位假象——进度条照走、拖动/暂停都作用在旧歌上（离线切未缓存
+          // 歌的实测现象）。用 pause 而非 stop：保留旧 source（ExoPlayer
+          // renderer 不进入 idle），网络恢复后 setUrl 替换 source 再 play 走
+          // 标准路径，不触发「stop→setUrl→play 重绑失败」问题（见 _setUrl）。
+          // 用户主动暂停（_userPaused=true）时不打扰其暂停意图。
+          if (_player.playing && !_userPaused) {
+            try {
+              await _player.pause();
+            } catch (_) {}
+            _setUiPlaying(false);
+            notifyListeners();
+          }
           networkAttempts++;
           final delay = networkRetryBaseDelay * networkAttempts;
           final detail = fetchError.networkCauseDetail;
@@ -1788,6 +1812,8 @@ class PlayerProvider extends ChangeNotifier {
       // 播放成功启动：网络已恢复，重置流中断自动恢复的连续失败计数。
       // 覆盖断点续播、网络自愈、普通重试三条路径的恢复成功场景。
       _streamRecoverStreak = 0;
+      // 播放真正启动：发出内容重载信号，供此前因断网加载失败的封面/歌词重试。
+      _contentTick++;
     }
     // _startPlayback 可能因 _userPaused=true 提前 return（没播起来），
     // 也可能重试后最终 playing=false（native bug）。但此时 Provider 内部状态

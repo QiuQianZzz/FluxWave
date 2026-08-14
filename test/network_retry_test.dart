@@ -69,6 +69,8 @@ void main() {
       expect(player.skipStopReason, isNull);
       // 当前曲保持不变（未被自动跳过到下一首）。
       expect(player.currentSong?.id, 1);
+      // 网络失败期间不误报「播放中」：底层旧曲已暂停/停止，UI 不应显示播放态。
+      expect(player.playing, isFalse);
       // 保留错误态供 UI 提示，而非误报无版权。
       expect(player.error, isNotNull);
       expect(player.error, isA<NeteaseException>());

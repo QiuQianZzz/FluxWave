@@ -44,7 +44,10 @@ class LyricProvider {
     _loading[songId] = fut;
     try {
       final lines = await fut;
-      _putCache(songId, lines);
+      // 只缓存有内容的成功结果：空列表（真无歌词/失败）不缓存，否则断网
+      // 失败返回的空结果会被永久缓存，后续任何重载都直接命中缓存返回空，
+      // 表现为「切歌回来仍是暂无歌词」。
+      if (lines.isNotEmpty) _putCache(songId, lines);
       return lines;
     } finally {
       _loading.remove(songId);
@@ -68,68 +71,65 @@ class LyricProvider {
     int songId, {
     String? songKey,
   }) async {
-    try {
-      // 1. 尝试磁盘缓存（原始文本）
-      if (songKey != null) {
-        try {
-          final diskCached = await LyricsCache.instance.read(songKey);
-          if (diskCached != null && diskCached.isNotEmpty) {
-            final lines = LyricParser.parseAuto(diskCached);
-            if (lines.isNotEmpty) return lines;
-          }
-        } catch (_) {}
-      }
-
-      // 2. 网络加载
-      final body = await _fetchLyric(songId);
-      if (body['code'] != 200) return const [];
-
-      // 主歌词：yrc 优先，回退 lrc
-      final yrc = _extractLyricText(body, 'yrc');
-      final lrc = _extractLyricText(body, 'lrc');
-      final mainText = yrc.isNotEmpty ? yrc : lrc;
-      if (mainText.isEmpty) return const [];
-
-      // 解析主歌词
-      final mainLines = LyricParser.parseAuto(mainText);
-      if (mainLines.isEmpty) return const [];
-
-      // 翻译：ytlrc 优先，回退 tlyric
-      final transText = _extractLyricText(body, 'ytlrc').isNotEmpty
-          ? _extractLyricText(body, 'ytlrc')
-          : _extractLyricText(body, 'tlyric');
-      var result = mainLines;
-      if (transText.isNotEmpty) {
-        final transLines = LyricParser.parseLrc(transText);
-        result = LyricParser.alignTranslation(
-          result,
-          transLines,
-          isRoman: false,
-        );
-      }
-
-      // 罗马音：yromalrc 优先，回退 romalrc
-      final romanText = _extractLyricText(body, 'yromalrc').isNotEmpty
-          ? _extractLyricText(body, 'yromalrc')
-          : _extractLyricText(body, 'romalrc');
-      if (romanText.isNotEmpty) {
-        final romanLines = LyricParser.parseLrc(romanText);
-        result = LyricParser.alignTranslation(
-          result,
-          romanLines,
-          isRoman: true,
-        );
-      }
-
-      // 3. 写入磁盘缓存（原始文本，不含翻译/罗马音对齐后的结构）
-      if (songKey != null && mainText.isNotEmpty) {
-        LyricsCache.instance.write(songKey, mainText);
-      }
-
-      return result;
-    } catch (_) {
-      return const [];
+    // 1. 尝试磁盘缓存（原始文本）。磁盘读取失败不视为歌词失败，回退网络。
+    if (songKey != null) {
+      try {
+        final diskCached = await LyricsCache.instance.read(songKey);
+        if (diskCached != null && diskCached.isNotEmpty) {
+          final lines = LyricParser.parseAuto(diskCached);
+          if (lines.isNotEmpty) return lines;
+        }
+      } catch (_) {}
     }
+
+    // 2. 网络加载。网络/接口异常向上抛出：不缓存失败结果，调用方据此区分
+    //    「加载失败」（可重试）与「真没有歌词」（返回空列表，成功语义）。
+    final body = await _fetchLyric(songId);
+    if (body['code'] != 200) return const [];
+
+    // 主歌词：yrc 优先，回退 lrc
+    final yrc = _extractLyricText(body, 'yrc');
+    final lrc = _extractLyricText(body, 'lrc');
+    final mainText = yrc.isNotEmpty ? yrc : lrc;
+    if (mainText.isEmpty) return const [];
+
+    // 解析主歌词
+    final mainLines = LyricParser.parseAuto(mainText);
+    if (mainLines.isEmpty) return const [];
+
+    // 翻译：ytlrc 优先，回退 tlyric
+    final transText = _extractLyricText(body, 'ytlrc').isNotEmpty
+        ? _extractLyricText(body, 'ytlrc')
+        : _extractLyricText(body, 'tlyric');
+    var result = mainLines;
+    if (transText.isNotEmpty) {
+      final transLines = LyricParser.parseLrc(transText);
+      result = LyricParser.alignTranslation(
+        result,
+        transLines,
+        isRoman: false,
+      );
+    }
+
+    // 罗马音：yromalrc 优先，回退 romalrc
+    final romanText = _extractLyricText(body, 'yromalrc').isNotEmpty
+        ? _extractLyricText(body, 'yromalrc')
+        : _extractLyricText(body, 'romalrc');
+    if (romanText.isNotEmpty) {
+      final romanLines = LyricParser.parseLrc(romanText);
+      result = LyricParser.alignTranslation(
+        result,
+        romanLines,
+        isRoman: true,
+      );
+    }
+
+    // 3. 写入磁盘缓存（原始文本，不含翻译/罗马音对齐后的结构）
+    if (songKey != null && mainText.isNotEmpty) {
+      LyricsCache.instance.write(songKey, mainText);
+    }
+
+    return result;
   }
 
   /// 提取响应字段 `{field: {lyric: "..."}}` 中的 lyric 字符串。

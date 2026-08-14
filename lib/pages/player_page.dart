@@ -331,6 +331,7 @@ class _PlayerPageState extends State<PlayerPage>
                           songKey: '${song.source}_${song.id}',
                           height: bodyH,
                           fontSize: lyricFontSize,
+                          reloadToken: player.contentTick,
                         ),
                       ),
                     ],
@@ -530,6 +531,7 @@ class _PlayerPageState extends State<PlayerPage>
                       songId: song.id,
                       songKey: '${song.source}_${song.id}',
                       height: lyricsH > 0.1 ? lyricsH : 0,
+                      reloadToken: player.contentTick,
                     ),
                   ),
                 ),
@@ -589,6 +591,8 @@ class _PlayerPageState extends State<PlayerPage>
             ? CoverImage(
                 url: cover,
                 songKey: songKey,
+                // 断网加载失败后，随播放自愈成功（contentTick+1）重试封面。
+                reloadToken: context.read<PlayerProvider>().contentTick,
                 placeholder: _coverFallback(cs),
               )
             : _coverFallback(cs),
@@ -813,11 +817,16 @@ class _LyricPanel extends StatefulWidget {
   /// 歌词字号。窄屏默认 20；宽屏按列宽自适应传入更大值。
   final double fontSize;
 
+  /// 内容重载信号：变化且上次加载失败（_failed）时重新加载歌词。
+  /// 配合 [PlayerProvider.contentTick] 在自愈续播成功后重试断网失败的歌词。
+  final int? reloadToken;
+
   const _LyricPanel({
     required this.songId,
     this.songKey,
     required this.height,
     this.fontSize = 20,
+    this.reloadToken,
   });
 
   @override
@@ -831,6 +840,9 @@ class _LyricPanelState extends State<_LyricPanel> {
   List<LyricLine> _lines = const [];
   bool _loading = true;
 
+  /// 上次加载是否失败（如断网）：用于 reloadToken 变化时仅对失败过的歌词重试。
+  bool _failed = false;
+
   @override
   void initState() {
     super.initState();
@@ -841,6 +853,8 @@ class _LyricPanelState extends State<_LyricPanel> {
   void didUpdateWidget(covariant _LyricPanel old) {
     super.didUpdateWidget(old);
     if (old.songId != widget.songId) {
+      _loadLyrics();
+    } else if (old.reloadToken != widget.reloadToken && _failed) {
       _loadLyrics();
     }
   }
@@ -854,6 +868,7 @@ class _LyricPanelState extends State<_LyricPanel> {
       });
       return;
     }
+    _failed = false;
     setState(() => _loading = true);
     try {
       final provider = _provider ??= LyricProvider(netease.api);
@@ -865,6 +880,7 @@ class _LyricPanelState extends State<_LyricPanel> {
         });
       }
     } catch (_) {
+      _failed = true;
       if (mounted) {
         setState(() {
           _lines = const [];

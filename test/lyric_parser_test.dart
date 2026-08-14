@@ -283,5 +283,35 @@ void main() {
       final lines = await provider.load(1);
       expect(lines.first.translation, 'Translation');
     });
+
+    test('网络失败抛异常且不缓存，重试可重新请求', () async {
+      var calls = 0;
+      final provider = makeProvider((_) async {
+        calls++;
+        if (calls == 1) throw Exception('network down');
+        return {
+          'code': 200,
+          'lrc': {'lyric': '[00:01.000]测试'},
+        };
+      });
+      // 第一次失败：异常向上抛出（失败结果不入缓存）
+      await expectLater(provider.load(1), throwsA(isA<Exception>()));
+      // 第二次重试：重新发起请求并成功（而非命中缓存的空结果）
+      final lines = await provider.load(1);
+      expect(lines, isNotEmpty);
+      expect(calls, 2);
+    });
+
+    test('空结果不缓存：再次 load 会重新请求', () async {
+      var calls = 0;
+      final provider = makeProvider((_) async {
+        calls++;
+        return {'code': 404};
+      });
+      await provider.load(1);
+      await provider.load(1);
+      // 空/失败结果未缓存 → 第二次重新请求（配合断网恢复后歌词重试）。
+      expect(calls, 2);
+    });
   });
 }
