@@ -72,6 +72,10 @@ class AppAudioHandler extends BaseAudioHandler
   /// 封面临时文件基目录（`<temp>/fluxwave_artwork/`）。
   Future<String>? _artworkDirFuture;
 
+  /// 是否已做过启动清理（每进程一次）。首次解析临时目录时清掉上一会话
+  /// 残留的封面文件，把磁盘占用限制在本会话内。
+  bool _artworkCleaned = false;
+
   /// 设置当前媒体信息（歌曲标题、歌手、封面、时长）。
   ///
   /// 封面不直接传 CDN URL：那会让原生加载器在断网/无缓存时拉取失败（且其请求
@@ -166,8 +170,43 @@ class AppAudioHandler extends BaseAudioHandler
   Future<String> _artworkDir() {
     return _artworkDirFuture ??= () async {
       final temp = await getTemporaryDirectory();
-      return '${temp.path}/fluxwave_artwork';
+      final dir = '${temp.path}/fluxwave_artwork';
+      if (!_artworkCleaned) {
+        _artworkCleaned = true;
+        // 启动清理：删掉上一会话残留的封面临时文件（本会话按需重建，重建时
+        // fetchBytes 仍命中内存/磁盘封面缓存，不重新下载）。清理放在本缓存
+        // Future 体内、返回路径之前，占位图/封面写入都在 await 之后发生，
+        // 「先删干净、再写新文件」顺序天然成立，无删掉正在写的文件的竞态。
+        try {
+          final old = Directory(dir);
+          if (await old.exists()) {
+            await old.delete(recursive: true);
+          }
+        } catch (_) {}
+      }
+      return dir;
     }();
+  }
+
+  /// 通知栏封面临时目录（`<temp>/fluxwave_artwork/`）总大小（字节）。
+  ///
+  /// 供设置页展示。该目录由启动时自动清理接管，且位于系统可清理的应用
+  /// 缓存目录内（手机管家/系统「清理缓存」可清除），无需手动删除。
+  static Future<int> artworkCacheBytes() async {
+    try {
+      final temp = await getTemporaryDirectory();
+      final dir = Directory('${temp.path}/fluxwave_artwork');
+      if (!await dir.exists()) return 0;
+      var total = 0;
+      await for (final entity in dir.list(recursive: true)) {
+        if (entity is File) {
+          total += await entity.length();
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
   }
 
   /// 更新播放状态（播放/暂停/进度/缓冲等）。

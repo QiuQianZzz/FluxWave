@@ -181,6 +181,48 @@ void main() {
     expect(events.last!.id, 'netease_7');
     expect(events.last!.artUri!.path, endsWith('cover_netease_7.jpg'));
   });
+
+  test('启动清理：新 handler（模拟重启）首次用目录时清掉上一会话残留封面', () async {
+    // 会话 1：播一首有封面的歌，落盘临时封面文件。
+    final handler1 = AppAudioHandler();
+    final events1 = subscribe(handler1);
+    const url1 = 'https://127.0.0.1:1/restart_a.jpg';
+    CoverImageCache.instance.put(url1, Uint8List.fromList([1]));
+    await handler1.setMediaItem(song(8), coverUrl: url1);
+    await waitFor(
+      events1,
+      () => events1.isNotEmpty &&
+          events1.last!.artUri!.path.endsWith('cover_netease_8.jpg'),
+      '会话1封面',
+    );
+    expect(await AppAudioHandler.artworkCacheBytes(), greaterThan(0));
+    final oldCover = File('${tempDir.path}/fluxwave_artwork/cover_netease_8.jpg');
+    expect(oldCover.existsSync(), isTrue);
+
+    // 会话 2：新 handler 模拟重启——首次解析临时目录即清理上一会话残留，
+    // 本会话按需重建。
+    final handler2 = AppAudioHandler();
+    final events2 = subscribe(handler2);
+    const url2 = 'https://127.0.0.1:1/restart_b.jpg';
+    CoverImageCache.instance.put(url2, Uint8List.fromList([2]));
+    await handler2.setMediaItem(song(9), coverUrl: url2);
+    await waitFor(
+      events2,
+      () => events2.isNotEmpty &&
+          events2.last!.artUri!.path.endsWith('cover_netease_9.jpg'),
+      '会话2封面',
+    );
+    // 上一会话的文件已被清掉，只剩本会话新写的文件。
+    expect(oldCover.existsSync(), isFalse);
+    expect(
+      File('${tempDir.path}/fluxwave_artwork/cover_netease_9.jpg').existsSync(),
+      isTrue,
+    );
+  });
+
+  test('artworkCacheBytes：无临时文件时返回 0', () async {
+    expect(await AppAudioHandler.artworkCacheBytes(), 0);
+  });
 }
 
 class _FakePathProvider extends PathProviderPlatform {

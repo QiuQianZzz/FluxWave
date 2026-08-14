@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/audio_cache/cache_store.dart';
+import '../../../core/audio_service/app_audio_handler.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/section_card.dart';
 import '../../../widgets/page_scroll_view.dart';
@@ -32,11 +33,20 @@ class _StorageSectionState extends State<StorageSection> {
   int _entryCount = 0;
   int _songCount = 0;
 
+  /// 通知栏封面临时目录总大小（字节）；异步读取，[fetchCoverBytesInFlight]
+  /// 防并发叠加。
+  int _coverBytes = 0;
+  bool _fetchCoverBytesInFlight = false;
+
   @override
   void initState() {
     super.initState();
     _refresh();
-    _timer = Timer.periodic(_refreshInterval, (_) => _refresh());
+    _refreshCoverBytes();
+    _timer = Timer.periodic(_refreshInterval, (_) {
+      _refresh();
+      _refreshCoverBytes();
+    });
   }
 
   @override
@@ -61,6 +71,19 @@ class _StorageSectionState extends State<StorageSection> {
       _entryCount = entries;
       _songCount = songs;
     });
+  }
+
+  Future<void> _refreshCoverBytes() async {
+    if (_fetchCoverBytesInFlight) return;
+    _fetchCoverBytesInFlight = true;
+    try {
+      final bytes = await AppAudioHandler.artworkCacheBytes();
+      if (mounted && bytes != _coverBytes) {
+        setState(() => _coverBytes = bytes);
+      }
+    } finally {
+      _fetchCoverBytesInFlight = false;
+    }
   }
 
   Future<void> _clearCache() async {
@@ -149,6 +172,29 @@ class _StorageSectionState extends State<StorageSection> {
                 onPressed: _clearCache,
                 icon: const Icon(Icons.cleaning_services_rounded, size: 18),
                 label: const Text('清理缓存'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SectionCard(
+          icon: Icons.image_outlined,
+          title: '封面缓存',
+          children: [
+            Text(
+              '通知栏封面临时文件：播放封面时写入应用缓存目录，供系统通知栏读取。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _Row(title: '已用空间', value: _fmtBytes(_coverBytes)),
+            const SizedBox(height: 8),
+            Text(
+              '应用启动时自动清理，无需手动删除；位于系统可清理的应用缓存目录内，'
+              '手机管家等系统清理工具清理缓存时也会一并清除。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
               ),
             ),
           ],
