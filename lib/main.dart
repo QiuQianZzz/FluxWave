@@ -228,7 +228,7 @@ class _FluxWaveAppState extends State<FluxWaveApp>
           return AnnotatedRegion<SystemUiOverlayStyle>(
             value: uiStyle,
             child: MaterialApp(
-              title: 'FluxWave',
+              title: kDebugMode ? 'FluxWave Dev' : 'FluxWave',
               debugShowCheckedModeBanner: false,
               theme: tp.lightTheme,
               darkTheme: tp.darkTheme,

@@ -15,6 +15,9 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // 强制设置 Activity 标题，确保最近任务显示正确的应用名
+        // （audio_service 的 FlutterActivity 初始化可能重置标题）
+        title = getString(R.string.app_name)
         notificationPermissionHandler = NotificationPermissionHandler(this)
         wifiLockHandler = WifiLockHandler(this)
 
