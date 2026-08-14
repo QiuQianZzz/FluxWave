@@ -16,10 +16,10 @@ class MockPathProviderPlatform extends Fake
 void main() {
   late DatabaseHelper db;
 
-  setUpAll(() {
+  setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     PathProviderPlatform.instance = MockPathProviderPlatform();
-    DatabaseHelper.initForTest();
+    await DatabaseHelper.initForTest();
   });
 
   tearDownAll(() async {

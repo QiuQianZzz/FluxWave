@@ -16,13 +16,13 @@ class MockPathProviderPlatform extends Fake
 void main() {
   late DatabaseHelper db;
 
-  setUpAll(() {
+  setUpAll(() async {
     // 初始化 Flutter 绑定（测试环境需要）
     TestWidgetsFlutterBinding.ensureInitialized();
     // 模拟 path_provider
     PathProviderPlatform.instance = MockPathProviderPlatform();
     // 内存数据库初始化
-    DatabaseHelper.initForTest();
+    await DatabaseHelper.initForTest();
   });
 
   tearDownAll(() async {

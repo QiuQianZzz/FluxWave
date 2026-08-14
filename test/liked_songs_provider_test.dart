@@ -15,10 +15,10 @@ class MockPathProviderPlatform extends Fake
 }
 
 void main() {
-  setUpAll(() {
+  setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     PathProviderPlatform.instance = MockPathProviderPlatform();
-    DatabaseHelper.initForTest();
+    await DatabaseHelper.initForTest();
   });
 
   tearDownAll(() async {
