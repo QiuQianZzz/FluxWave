@@ -111,7 +111,21 @@ class BackupService {
   /// - 同一条目内容不同（同一首歌但数据不一致）
   ///
   /// 完全一致（两边都有且数据相同）不算差异，导入时静默保留。
+  ///
+  /// 备份文件无法解析或结构错误时抛出 [FormatException]。
   static Future<Map<BackupItem, List<String>>> detectConflicts(
+    File file,
+    List<BackupItem> items,
+  ) async {
+    try {
+      return await _detectConflicts(file, items);
+    } catch (e) {
+      AppLog.error('检测备份冲突失败', tag: 'backup', error: e);
+      throw FormatException('备份文件无法解析或结构错误');
+    }
+  }
+
+  static Future<Map<BackupItem, List<String>>> _detectConflicts(
     File file,
     List<BackupItem> items,
   ) async {
@@ -319,7 +333,21 @@ class BackupService {
   /// [file] 备份文件。
   /// [resolutions] 每项导入决策：key 为要导入的项目，value 为其冲突策略。
   /// 不在 map 中的项目将被跳过（不导入）。
+  ///
+  /// 备份文件无法解析或结构错误时抛出 [FormatException]。
   static Future<void> import(
+    File file,
+    Map<BackupItem, ConflictStrategy> resolutions,
+  ) async {
+    try {
+      await _import(file, resolutions);
+    } catch (e) {
+      AppLog.error('导入备份失败', tag: 'backup', error: e);
+      throw FormatException('导入备份失败或备份文件损坏');
+    }
+  }
+
+  static Future<void> _import(
     File file,
     Map<BackupItem, ConflictStrategy> resolutions,
   ) async {

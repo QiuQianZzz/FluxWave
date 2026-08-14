@@ -510,4 +510,40 @@ void main() {
       );
     });
   });
+
+  group('错误处理', () {
+    test('检测冲突：JSON 语法损坏抛出 FormatException', () async {
+      final f = File('${tempDir.path}/corrupt.json');
+      f.writeAsStringSync('{"manifest": ');
+      expect(
+        () => BackupService.detectConflicts(f, const [BackupItem.playlists]),
+        throwsFormatException,
+      );
+    });
+
+    test('检测冲突：结构错误（playlists 为数组而非对象）抛出 FormatException', () async {
+      final backup = writeBackup({
+        'playlists': [_song(id: 1, name: '歌曲A')],
+      });
+      expect(
+        () => BackupService.detectConflicts(
+          backup,
+          const [BackupItem.playlists],
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('导入：备份文件损坏抛出 FormatException', () async {
+      final f = File('${tempDir.path}/corrupt_import.json');
+      f.writeAsStringSync('not json');
+      expect(
+        () => BackupService.import(
+          f,
+          {BackupItem.playlists: ConflictStrategy.merge},
+        ),
+        throwsFormatException,
+      );
+    });
+  });
 }

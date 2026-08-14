@@ -86,8 +86,15 @@ class _BackupPageState extends State<BackupPage> {
     final items = await _showImportSelection(availableItems);
     if (items == null || items.isEmpty) return;
 
-    // 检查冲突
-    final conflicts = await BackupService.detectConflicts(backupFile, items);
+    // 检查冲突（结构错误的备份文件在此转为友好提示）
+    final Map<BackupItem, List<String>> conflicts;
+    try {
+      conflicts = await BackupService.detectConflicts(backupFile, items);
+    } catch (_) {
+      if (!mounted) return;
+      AppToast.show(context, '备份文件格式错误');
+      return;
+    }
 
     if (!mounted) return;
     // 需要用户决策的项：检测到差异的项目（设置无差异时也无需决策）
