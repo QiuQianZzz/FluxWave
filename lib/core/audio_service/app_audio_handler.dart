@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../models/song.dart';
+import '../logging/app_log.dart';
 import '../../widgets/cover_image.dart';
 
 /// 应用级媒体会话处理器。
@@ -106,8 +107,15 @@ class AppAudioHandler extends BaseAudioHandler
       if (seq != _artworkSeq) return;
       _coverUris[songKey] = uri;
       if (uri != known) _emitMediaItem(seq, song, uri);
-    } catch (_) {
-      // 封面解析失败：通知栏已显示阶段 1 的占位图，静默降级。
+    } catch (e, st) {
+      // 封面解析失败：通知栏已显示阶段 1 的占位图，静默降级，但留日志
+      // 便于排障（若为编程错误也能看到线索）。
+      AppLog.warn(
+        '通知栏封面解析失败，保留占位图：${song.name}',
+        tag: 'media',
+        error: e,
+        stack: st,
+      );
     }
   }
 

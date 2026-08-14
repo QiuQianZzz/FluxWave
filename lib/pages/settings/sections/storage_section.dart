@@ -26,6 +26,10 @@ class StorageSection extends StatefulWidget {
 class _StorageSectionState extends State<StorageSection> {
   static const _refreshInterval = Duration(milliseconds: 500);
 
+  /// 封面缓存总大小刷新节流：大小只在播放新歌时变化，无需 500ms 高频
+  /// 遍历目录（逐文件 stat），放宽到 3s 一次。
+  static const _coverRefreshInterval = Duration(seconds: 3);
+
   Timer? _timer;
 
   /// 最近一次读取的缓存用量快照（用于 build 时不依赖外部通知）。
@@ -33,10 +37,10 @@ class _StorageSectionState extends State<StorageSection> {
   int _entryCount = 0;
   int _songCount = 0;
 
-  /// 通知栏封面临时目录总大小（字节）；异步读取，[fetchCoverBytesInFlight]
-  /// 防并发叠加。
+  /// 通知栏封面临时目录总大小（字节）；异步读取，节流 + 防并发叠加。
   int _coverBytes = 0;
   bool _fetchCoverBytesInFlight = false;
+  int _lastCoverRefreshAt = 0;
 
   @override
   void initState() {
@@ -74,7 +78,13 @@ class _StorageSectionState extends State<StorageSection> {
   }
 
   Future<void> _refreshCoverBytes() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // 节流：距上次读取不足 3s 则跳过（封面大小变化很低频）。
+    if (now - _lastCoverRefreshAt < _coverRefreshInterval.inMilliseconds) {
+      return;
+    }
     if (_fetchCoverBytesInFlight) return;
+    _lastCoverRefreshAt = now;
     _fetchCoverBytesInFlight = true;
     try {
       final bytes = await AppAudioHandler.artworkCacheBytes();
