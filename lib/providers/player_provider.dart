@@ -9,7 +9,9 @@ import '../core/audio_cache/audio_cache.dart';
 import '../core/audio_cache/proxy_server.dart';
 import '../core/audio_service/media_session_manager.dart';
 import '../core/logging/app_log.dart';
+import '../core/netease/netease_client.dart';
 import '../core/platform_utils.dart';
+import '../core/wifi_lock.dart';
 import '../core/playback_stats/database_helper.dart';
 import '../core/player/playback_storage.dart';
 import '../core/player/song_url.dart';
@@ -55,10 +57,22 @@ class PlayerProvider extends ChangeNotifier {
     required this.liked,
     this.storage,
     PlaybackSnapshot? snapshot,
+    this.networkRetryAttempts = 3,
+    this.networkRetryBaseDelay = const Duration(seconds: 2),
   }) : _initialSnapshot = snapshot;
 
   final NeteaseProvider netease;
   final SettingsProvider settings;
+
+  /// 网络瞬时故障（断网/DNS/超时/TLS）时的原地退避重试次数。
+  ///
+  /// 网络故障 ≠ 歌曲不可播：不触发跳过链、不计入连续失败，退避重试等网络恢复。
+  /// 测试环境网络被屏蔽会抛 SocketException，故测试构造传 0 关闭重试，
+  /// 维持"网络失败即走跳过链"的既有行为。
+  final int networkRetryAttempts;
+
+  /// 重试退避基数：第 n 次重试等待 `baseDelay * n`。
+  final Duration networkRetryBaseDelay;
 
   /// 「我喜欢的音乐」引用：收藏/取消走后端同步通知栏图标。
   final LikedSongsProvider liked;
@@ -127,6 +141,18 @@ class PlayerProvider extends ChangeNotifier {
   bool _buffering = false;
   Object? _error;
   bool _isTrial = false;
+
+  /// 网络瞬时故障（断网/DNS/超时/TLS）退避重试后的长周期兜底重试定时器。
+  ///
+  /// 短退避重试在 `_loadCurrentInternal` 内同步完成；全部耗尽仍失败时，
+  /// 用此定时器每隔 [networkRetryBaseDelay] 再自动发起一次 `_loadCurrent`，
+  /// 让后台网络恢复后能自愈续播，而不是停在错误态等用户手动操作。
+  /// 用户切歌/主动操作时由 `_loadCurrent` 入口统一取消。
+  Timer? _networkRetryTimer;
+
+  /// 网络自愈重试的已连续次数：决定下一次重试间隔（递增后封顶），
+  /// 成功或用户切歌后归零。
+  int _networkSelfHealStreak = 0;
 
   /// 当前连续播放会话的起始时间戳（毫秒）；暂停/停止时清 null。
   int? _lastPlayStartTime;
@@ -584,6 +610,16 @@ class PlayerProvider extends ChangeNotifier {
   void _setUiPlaying(bool v) {
     if (_uiPlaying == v) return;
     _uiPlaying = v;
+    if (v) {
+      // 播放成功恢复：重置网络自愈重试计数，避免弱网场景误用旧间隔。
+      _networkSelfHealStreak = 0;
+      // 开始播放 → 持 WiFi 锁：息屏时保持网卡活性，降低后台取歌地址
+      // 的 DNS 解析失败（errno=7）概率。异步失败不影响播放。
+      unawaited(WifiLock.acquire());
+    } else {
+      // 停止播放 → 释放 WiFi 锁，归还系统网络电源。
+      unawaited(WifiLock.release());
+    }
     notifyListeners();
     _scheduleSave();
     // 同步媒体会话播放状态
@@ -1196,6 +1232,10 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> _loadCurrent() async {
     final song = currentSong;
     if (song == null) return;
+    // 用户切歌/主动操作会再次 _loadCurrent：取消网络故障兜底重试定时器，
+    // 避免上一首歌遗留的定时器在用户已切走后仍自动发起加载。
+    _networkRetryTimer?.cancel();
+    _networkRetryTimer = null;
     // 串行化守卫：已有 _loadCurrent 在执行中 → 记当前 (source, songId)，
     // 前一次执行完毕后检查挂起是否仍是最后一次请求的歌，再补偿。
     if (_loadInProgress) {
@@ -1320,41 +1360,70 @@ class PlayerProvider extends ChangeNotifier {
         if (fallbackLevel != qualityLevel && fallbackLevel != known)
           fallbackLevel,
       ];
-      SongUrlResult? trial;
-      Object? loadError;
-      Object? fetchError;
-      for (final level in levels) {
-        final Map<String, dynamic> body;
-        try {
-          body = await netease.api.songUrl([song.id], level: level);
-        } catch (e, st) {
-          // 取 URL 的网络请求失败（断网/代理/服务端异常）：记录首个错误，
-          // 尝试其它档位，不在此中断——真正的无版权应能正常返回但无 url。
-          fetchError ??= e;
-          AppLog.warn(
-            '获取歌曲 URL 失败：${song.name} (level=$level)',
-            tag: 'player',
-            error: e,
-            stack: st,
-          );
-          continue;
-        }
-        if (token != _currentLoadToken) {
-          return;
-        }
-        final result = SongUrlResolver.parse(body);
-        if (result == null) {
-          continue;
-        }
-        if (!result.isTrial) {
+      // 网络瞬时故障退避重试：把「逐档取 URL → 试听 → 缓存兜底」整段包进循环。
+      // - 网络错误（DNS 解析失败/超时/TLS/断网，NeteaseException.isNetwork）：
+      //   属瞬时故障，不跳过、不计连续失败，原地退避重试 networkRetryAttempts 次；
+      //   全部耗尽后保留当前曲、显式停止播放并挂 _networkRetryTimer 长周期自愈续播，
+      //   网络恢复后自动从当前曲继续。
+      // - 无版权/需会员（接口正常但 parse 无 url）/CDN 播放失败：非网络问题，走
+      //   原有跳过链，防止卡死当前曲。
+      var networkAttempts = 0;
+      while (true) {
+        SongUrlResult? trial;
+        Object? loadError;
+        Object? fetchError;
+        for (final level in levels) {
+          final Map<String, dynamic> body;
           try {
-            await _setUrl(result, level: level, loadToken: token);
+            body = await netease.api.songUrl([song.id], level: level);
+          } catch (e, st) {
+            // 取 URL 的网络请求失败（断网/DNS/代理/服务端异常）：记录首个错误，
+            // 尝试其它档位，不在此中断——真正的无版权应能正常返回但无 url。
+            fetchError ??= e;
+            AppLog.warn(
+              '获取歌曲 URL 失败：${song.name} (level=$level)',
+              tag: 'player',
+              error: e,
+              stack: st,
+            );
+            continue;
+          }
+          if (token != _currentLoadToken) {
+            return;
+          }
+          final result = SongUrlResolver.parse(body);
+          if (result == null) {
+            continue;
+          }
+          if (!result.isTrial) {
+            try {
+              await _setUrl(result, level: level, loadToken: token);
+              return;
+            } catch (e, st) {
+              // url 设置失败（CDN 403、格式不支持等），清理 player 状态后降级。
+              loadError = e;
+              AppLog.warn(
+                'URL 播放失败（CDN/格式）：${song.name} (level=$level)',
+                tag: 'player',
+                error: e,
+                stack: st,
+              );
+              try {
+                await _player.stop();
+              } catch (_) {}
+              continue;
+            }
+          }
+          trial ??= result;
+        }
+        if (trial != null) {
+          try {
+            await _setUrl(trial, loadToken: token);
             return;
           } catch (e, st) {
-            // url 设置失败（CDN 403、格式不支持等），清理 player 状态后降级。
             loadError = e;
             AppLog.warn(
-              'URL 播放失败（CDN/格式）：${song.name} (level=$level)',
+              '试听 URL 播放失败：${song.name}',
               tag: 'player',
               error: e,
               stack: st,
@@ -1362,88 +1431,118 @@ class PlayerProvider extends ChangeNotifier {
             try {
               await _player.stop();
             } catch (_) {}
-            continue;
           }
         }
-        trial ??= result;
-      }
-      if (trial != null) {
-        try {
-          await _setUrl(trial, loadToken: token);
-          return;
-        } catch (e, st) {
-          loadError = e;
+        // 离线兜底：在线全链失败（断网/无可用 URL/试听也失败）且该歌存在任意档
+        // 完整缓存时，按最高档播缓存，不计入连续失败、不触发自动跳过——避免
+        // 「网络抖动/断网 → 被归类为跳过 → 把本有缓存可播的歌跳空」。
+        if (token == _currentLoadToken) {
+          final cachedHit = AudioCache.bestUrlFor(song, rank: _qualityRank);
+          if (cachedHit != null) {
+            try {
+              await _setUrl(
+                SongUrlResult(
+                  url: cachedHit.url,
+                  level: cachedHit.level,
+                  type: cachedHit.type,
+                  br: cachedHit.br,
+                ),
+                fromLevelCache: true,
+                loadToken: token,
+              );
+              return;
+            } catch (e, st) {
+              loadError = e;
+              AppLog.warn(
+                '缓存兜底播放失败：${song.name}',
+                tag: 'player',
+                error: e,
+                stack: st,
+              );
+              try {
+                await _player.stop();
+              } catch (_) {}
+            }
+          }
+        }
+        // 判定是否为网络类瞬时故障：仅取 URL 请求抛出的 NeteaseException。
+        // CDN 播放失败（loadError）属源侧问题，不进网络重试路径。
+        final isNetworkFailure = fetchError is NeteaseException &&
+            fetchError.isNetwork;
+        if (isNetworkFailure && networkAttempts < networkRetryAttempts) {
+          networkAttempts++;
+          final delay = networkRetryBaseDelay * networkAttempts;
+          final detail = fetchError.networkCauseDetail;
           AppLog.warn(
-            '试听 URL 播放失败：${song.name}',
+            '网络故障${detail != null ? '（$detail）' : ''}，'
+            '${delay.inMilliseconds}ms 后重试'
+            '（$networkAttempts/$networkRetryAttempts）：${song.name}',
             tag: 'player',
-            error: e,
-            stack: st,
+            error: fetchError,
           );
+          // 保持 buffering UI，短退避后原地重试同一首歌。
+          notifyListeners();
+          await Future<void>.delayed(delay);
+          if (token != _currentLoadToken) {
+            return;
+          }
+          continue;
+        }
+        // 所有档位均不可播：区分三类失败，给 UI 准确的提示文案。
+        // - 无版权/需会员（loadError == null 且 fetchError == null）：接口正常
+        //   返回但全部档位 parse 出 null，即根本没有可用 url，属于"永久性不可播"，
+        //   按原有逻辑自动跳过。
+        // - CDN/源加载失败（loadError != null）：setUrl/播放报错（CDN 403、代理
+        //   连不上等），非网络瞬时故障，仍按跳过逻辑处理，标记类型供 UI 区分。
+        // - 网络瞬时故障（isNetworkFailure 且重试耗尽）：不跳过、不计连续失败，
+        //   保留当前曲，显式停止播放并挂长周期定时器等待自愈续播。
+        if (isNetworkFailure) {
+          _error = fetchError;
+          _buffering = false;
+          final detail = fetchError.networkCauseDetail;
+          AppLog.warn(
+            '网络故障${detail != null ? '（$detail）' : ''}重试耗尽，'
+            '保留当前曲等待网络恢复自动续播：${song.name}',
+            tag: 'player',
+            error: fetchError,
+          );
+          notifyListeners();
+          _scheduleNetworkSelfHeal(song);
+          return;
+        }
+        // fetchError 走到这里必为非网络错误（网络错误已在上方提前返回），
+        // 若仍非空（业务码错误等）也归为 source 类型，与改动前语义一致。
+        final isSourceFailure = loadError != null || fetchError != null;
+        _skipKind = isSourceFailure ? 'source' : 'noPlayable';
+        _consecutiveFailures++;
+        _error = loadError ?? const NoPlayableUrlException();
+        _buffering = false;
+        final skipped = List<String>.from(_skippedSongs)..add(song.name);
+        _skippedSongs = List.unmodifiable(skipped);
+        AppLog.warn(
+          isSourceFailure
+              ? '源加载/网络失败，跳过：${song.name}'
+              : '无可播放 URL（付费/无版权）：${song.name}',
+          tag: 'player',
+        );
+        if (_consecutiveFailures <= 3 && hasNext) {
+          notifyListeners();
+          await _nextInternal();
+        } else {
+          // 连续跳过多首都失败：记录停止原因，UI 提示。
+          _skipStopReason = _consecutiveFailures > 3 ? 'overLimit' : 'noMore';
+          // 显式停止底层播放器并同步 UI，避免播放器仍停留在播放/缓冲状态，
+          // 造成通知栏/播放页的"播放中"假象（即便已无歌可播）。
           try {
             await _player.stop();
           } catch (_) {}
+          _buffering = false;
+          _error = loadError ?? const NoPlayableUrlException();
+          _setUiPlaying(false);
+          notifyListeners();
         }
-      }
-      // 离线兜底：在线全链失败（断网/无可用 URL/试听也失败）且该歌存在任意档
-      // 完整缓存时，按最高档播缓存，不计入连续失败、不触发自动跳过——避免
-      // 「网络抖动/断网 → 被归类为跳过 → 把本有缓存可播的歌跳空」。
-      if (token == _currentLoadToken) {
-        final cachedHit = AudioCache.bestUrlFor(song, rank: _qualityRank);
-        if (cachedHit != null) {
-          try {
-            await _setUrl(
-              SongUrlResult(
-                url: cachedHit.url,
-                level: cachedHit.level,
-                type: cachedHit.type,
-                br: cachedHit.br,
-              ),
-              fromLevelCache: true,
-              loadToken: token,
-            );
-            return;
-          } catch (e, st) {
-            loadError = e;
-            AppLog.warn(
-              '缓存兜底播放失败：${song.name}',
-              tag: 'player',
-              error: e,
-              stack: st,
-            );
-            try {
-              await _player.stop();
-            } catch (_) {}
-          }
-        }
-      }
-      // 所有档位均不可播：区分两类失败，给 UI 准确的提示文案。
-      // - 无版权/需会员（loadError == null 且 fetchError == null）：接口正常
-      //   返回但全部档位 parse 出 null，即根本没有可用 url，属于"永久性不可播"，
-      //   按原有逻辑自动跳过。
-      // - 源加载/网络失败（loadError != null || fetchError != null）：要么拿到
-      //   可播 url 但 setUrl/播放报错（CDN 403、代理连不上、网络抖动等），要么
-      //   取 URL 的请求本身失败（断网），属瞬时故障，不应误报为"无版权需会员"。
-      //   仍按跳过逻辑处理（避免卡死当前曲），但标记类型供 UI 区分。
-      final isSourceFailure = loadError != null || fetchError != null;
-      _skipKind = isSourceFailure ? 'source' : 'noPlayable';
-      _consecutiveFailures++;
-      _error = loadError ?? fetchError ?? const NoPlayableUrlException();
-      _buffering = false;
-      final skipped = List<String>.from(_skippedSongs)..add(song.name);
-      _skippedSongs = List.unmodifiable(skipped);
-      AppLog.warn(
-        isSourceFailure
-            ? '源加载/网络失败，跳过：${song.name}'
-            : '无可播放 URL（付费/无版权）：${song.name}',
-        tag: 'player',
-      );
-      if (_consecutiveFailures <= 3 && hasNext) {
-        notifyListeners();
-        await _nextInternal();
-      } else {
-        // 连续跳过多首都失败：记录停止原因，UI 提示。
-        _skipStopReason = _consecutiveFailures > 3 ? 'overLimit' : 'noMore';
-        notifyListeners();
+        // 跳过逻辑执行完毕，退出重试循环（仅网络错误会触发重试）。
+        break;
       }
     } catch (e, st) {
       _error = e;
@@ -1455,6 +1554,32 @@ class PlayerProvider extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  /// 网络瞬时故障重试耗尽后的长周期自愈续播。
+  ///
+  /// 保留当前曲（不跳过），显式停止播放，挂一个定时器周期性重发 [_loadCurrent]。
+  /// 后台网络（Doze/弱网）恢复后，本次重试会重新走短退避流程并成功续播当前曲。
+  /// 定时器采用「重试一轮后递增间隔，上限 [networkRetryBaseDelay] × 8」的策略，
+  /// 避免在弱网下高频空转。
+  void _scheduleNetworkSelfHeal(Song song) {
+    _networkRetryTimer?.cancel();
+    // 递增间隔：baseDelay × (1,2,3,…,8)，之后封顶，不再增长。
+    final attempts = (_networkSelfHealStreak % 8) + 1;
+    final delay = networkRetryBaseDelay * attempts;
+    _networkSelfHealStreak++;
+    _networkRetryTimer = Timer(delay, () {
+      _networkRetryTimer = null;
+      // 仅在用户仍未切走该曲时自愈续播。
+      final current = currentSong;
+      if (current != null &&
+          current.source == song.source &&
+          current.id == song.id) {
+        unawaited(_loadCurrent());
+      } else {
+        _networkSelfHealStreak = 0;
+      }
+    });
   }
 
   /// 设置播放器 URL。
@@ -1795,6 +1920,10 @@ class PlayerProvider extends ChangeNotifier {
   void dispose() {
     _saveDebounce?.cancel();
     _pendingFalseStateTimer?.cancel();
+    _networkRetryTimer?.cancel();
+    _networkRetryTimer = null;
+    // 归还 WiFi 锁，避免播放器销毁后锁残留。
+    unawaited(WifiLock.release());
     liked.removeListener(_onLikedChanged);
     // 落盘最终状态（快照先同步构建，避免 dispose 后访问 player 抛错）。
     unawaited(_persistNow());

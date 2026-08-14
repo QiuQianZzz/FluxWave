@@ -57,6 +57,7 @@ void main() {
           netease: netease,
           settings: settings,
           liked: LikedSongsProvider(),
+          networkRetryAttempts: 0,
         );
         player.init();
         // 实歌走网络解析（测试环境被屏蔽，会快速落入 NoPlayableUrlException），

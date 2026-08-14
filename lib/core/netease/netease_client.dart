@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
@@ -98,7 +99,13 @@ class NeteaseClient {
       }
       return parsed;
     } catch (e, st) {
-      AppLog.warn('接口请求失败：$uri', tag: 'netease', error: e, stack: st);
+      final detail = NeteaseException.describeNetworkCause(e);
+      AppLog.warn(
+        detail != null ? '接口请求失败（$detail）：$uri' : '接口请求失败：$uri',
+        tag: 'netease',
+        error: e,
+        stack: st,
+      );
       throw NeteaseException.network(e, requestPath: uri);
     } finally {
       http.close(force: true);
@@ -295,11 +302,86 @@ class NeteaseException implements Exception {
   final int code;
   final String? requestPath;
 
-  NeteaseException(this.message, {this.code = -1, this.requestPath});
+  /// 是否为瞬时网络故障（断网/DNS/超时/TLS），区别于服务端业务错误。
+  /// 网络故障不应计入"连续播放失败"的跳过链，应退避重试。
+  final bool isNetwork;
+
+  /// 网络故障的具体成因描述（DNS/超时/TLS 等），非网络类错误为 null。
+  String? get networkCauseDetail {
+    if (!isNetwork) return null;
+    final cause = _cause;
+    return cause == null ? null : describeNetworkCause(cause);
+  }
+
+  /// 原始底层异常（可能为 null）。
+  final Object? _cause;
+
+  NeteaseException(
+    this.message, {
+    this.code = -1,
+    this.requestPath,
+    this.isNetwork = false,
+    this._cause,
+  });
 
   /// 网络/运行时原生错误包装（无服务端 code）。
-  factory NeteaseException.network(Object cause, {String? requestPath}) =>
-      NeteaseException('请求失败: $cause', code: -1, requestPath: requestPath);
+  ///
+  /// [isNetwork] 依据底层 cause 类型自动判定：Socket/Handshake/超时等
+  /// 传输层异常为瞬时故障，重试可恢复；其余（如 json 解析失败）非网络问题。
+  factory NeteaseException.network(
+    Object cause, {
+    String? requestPath,
+  }) =>
+      NeteaseException(
+        '请求失败: $cause',
+        code: -1,
+        requestPath: requestPath,
+        isNetwork: _isNetworkCause(cause),
+        cause: cause,
+      );
+
+  static bool _isNetworkCause(Object cause) {
+    if (cause is SocketException) return true;
+    if (cause is TimeoutException) return true;
+    if (cause is HandshakeException) return true;
+    if (cause is HttpException) return true;
+    // 嵌套包装（如 socket 回调里的 OS 错误）递归检查。
+    return false;
+  }
+
+  /// 网络故障的具体成因描述（用于诊断日志）。
+  ///
+  /// 区分 DNS 解析失败 / 连接超时 / TLS 握手失败 / 连接拒绝 / HTTP 错误，
+  /// 帮助判断「是否是系统挂起网络（Doze/省电）导致」还是服务器侧问题。
+  /// 非网络类错误返回 null。
+  static String? describeNetworkCause(Object cause) {
+    if (cause is SocketException) {
+      final socket = cause.osError;
+      if (socket != null) {
+        final code = socket.errorCode;
+        if (code == 7) return 'DNS 解析失败(OS error $code)——疑似系统挂起网络(Doze/省电)';
+        if (code == 8) return '连接被拒绝(OS error $code)';
+        if (code == 110 || code == 60) return '连接超时(OS error $code)';
+        if (code == 64 || code == 61) return '连接被拒绝/对端未监听(OS error $code)';
+        if (code == 113) return '路由/网络不可达(OS error $code)';
+        return '套接字错误(OS error $code): ${socket.message}';
+      }
+      if (cause.address != null || cause.port != null) {
+        return '套接字错误(${cause.address}:${cause.port})';
+      }
+      return '套接字错误: ${cause.message}';
+    }
+    if (cause is TimeoutException) {
+      return '请求超时(${cause.duration})';
+    }
+    if (cause is HandshakeException) {
+      return 'TLS 握手失败: ${cause.message}';
+    }
+    if (cause is HttpException) {
+      return 'HTTP 错误: ${cause.message}';
+    }
+    return null;
+  }
 
   /// 服务端 body.code != 200 场景。
   factory NeteaseException.non200(

@@ -48,6 +48,7 @@ void main() {
       netease: netease,
       settings: settings,
       liked: LikedSongsProvider(),
+      networkRetryAttempts: 0,
     );
     player.init();
     return player;

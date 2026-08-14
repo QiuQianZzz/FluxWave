@@ -11,10 +11,18 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : AudioServiceActivity() {
 
     private lateinit var notificationPermissionHandler: NotificationPermissionHandler
+    private lateinit var wifiLockHandler: WifiLockHandler
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         notificationPermissionHandler = NotificationPermissionHandler(this)
+        wifiLockHandler = WifiLockHandler(this)
+
+        // 后台播放 WiFi 电源锁通道（息屏时保持网卡活性，见 WifiLockHandler）
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WifiLockHandler.CHANNEL)
+            .setMethodCallHandler { call, result ->
+                wifiLockHandler.handleMethodCall(call, result)
+            }
 
         // 桌面图标切换通道
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
