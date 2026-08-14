@@ -586,9 +586,9 @@ void main() {
       final buckets = await database.query('playback_stat_bucket');
       expect(buckets.length, 3);
       final keys = buckets
-          .map((b) => '${b['day_start']}|${b['source_id']}')
+          .map((b) => '${b['day_start']}|${b['source']}|${b['source_id']}')
           .toSet();
-      expect(keys, containsAll(['100|1', '200|1', '100|2']));
+      expect(keys, containsAll(['100|netease|1', '200|netease|1', '100|netease|2']));
     });
 
     test('DB 项导入原子性：中途失败整体回滚', () async {
