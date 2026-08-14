@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -115,9 +114,10 @@ void main() {
     await tester.pump();
 
     // 无版权（非网络故障）仍走跳过链：有跳过记录（skipCount 上升）。
-    // 注意：单曲队列无 next 时 overLimit/noMore 可能不推进，但至少被并入
-    // 跳过列表说明进入了"不可播"分支（而非网络自愈分支）。
+    // 两首都无版权 → 默认 list 循环下反复跳过，连续失败累计超限 → overLimit
+    // 停止原因置位，与「网络自愈保留当前曲」（stopReason 保持 null）严格区分。
     expect(player.skipCount, greaterThanOrEqualTo(1));
+    expect(player.skipStopReason, 'overLimit');
   });
 }
 

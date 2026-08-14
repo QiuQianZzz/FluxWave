@@ -1506,6 +1506,12 @@ class PlayerProvider extends ChangeNotifier {
             tag: 'player',
             error: fetchError,
           );
+          // 显式停止底层播放器并同步 UI：手动切歌不会先 stop 旧曲，若不停止
+          // 会残留「UI 显示新歌+错误、底层还在播旧歌」的播放中假象。
+          // 不 await：测试环境无 just_audio 平台实现时 stop() 会挂起在
+          // platform channel 上；生产环境 stop 为尽力而为，异步完成即可。
+          _player.stop().onError((_, _) {});
+          _setUiPlaying(false);
           notifyListeners();
           _scheduleNetworkSelfHeal(song);
           return;
@@ -1564,8 +1570,10 @@ class PlayerProvider extends ChangeNotifier {
   /// 避免在弱网下高频空转。
   void _scheduleNetworkSelfHeal(Song song) {
     _networkRetryTimer?.cancel();
-    // 递增间隔：baseDelay × (1,2,3,…,8)，之后封顶，不再增长。
-    final attempts = (_networkSelfHealStreak % 8) + 1;
+    // 递增间隔：baseDelay × (1,2,3,…,8)，之后封顶在 ×8，不再回退。
+    // 注意不可用 % 8：streak 到 8 会 (8 % 8)+1=1 重新从 baseDelay 跳回，
+    // 导致持续断网下退避间隔反复振荡。
+    final attempts = math.min(_networkSelfHealStreak, 7) + 1;
     final delay = networkRetryBaseDelay * attempts;
     _networkSelfHealStreak++;
     _networkRetryTimer = Timer(delay, () {

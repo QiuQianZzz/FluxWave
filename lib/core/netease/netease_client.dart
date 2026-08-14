@@ -95,7 +95,13 @@ class NeteaseClient {
         }
       }
       if (parsed is Map<String, dynamic>) {
-        await persistIfMutating(this, storage, uri, parsed);
+        // 会话落盘属副作用：失败不影响本次已成功的请求结果，仅记日志，
+        // 不把它误分类为网络故障（否则下游会把存储错误当"跳过源"）。
+        try {
+          await persistIfMutating(this, storage, uri, parsed);
+        } catch (e, st) {
+          AppLog.warn('会话持久化失败：$uri', tag: 'netease', error: e, stack: st);
+        }
       }
       return parsed;
     } catch (e, st) {
@@ -341,11 +347,12 @@ class NeteaseException implements Exception {
       );
 
   static bool _isNetworkCause(Object cause) {
+    if (cause is NeteaseException) return cause.isNetwork;
     if (cause is SocketException) return true;
     if (cause is TimeoutException) return true;
     if (cause is HandshakeException) return true;
     if (cause is HttpException) return true;
-    // 嵌套包装（如 socket 回调里的 OS 错误）递归检查。
+    // 其它传输层包装（如 HTTPSocket/回调中的嵌套异常）缺省非网络。
     return false;
   }
 
