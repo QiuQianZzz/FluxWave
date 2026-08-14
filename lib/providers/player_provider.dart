@@ -1786,6 +1786,10 @@ class PlayerProvider extends ChangeNotifier {
         song,
         coverUrl: song.coverFor(300),
       );
+      // 同步收藏状态（_setUrl 可能在 updateFavorite 之前被调用，
+      // 或 media session 异步初始化完成晚于 _loadCurrentInternal，
+      // 此处兜底确保通知栏收藏图标与实际状态一致）。
+      MediaSessionManager.instance.updateFavorite(liked: liked.isLiked(song));
       // 更新播放状态（包括缓冲状态）
       MediaSessionManager.instance.updatePlaybackState(
         playing: _uiPlaying,
