@@ -20,8 +20,8 @@ import '../models/song.dart';
 ///
 /// 缓存策略：
 /// - 进程内 LRU（256 项），所有封面共享；
-/// - 磁盘缓存（`cache/<songKey>/cover.jpg`），仅当传入 [songKey] 时生效，
-///   app 重启后命中磁盘可跳过网络请求。
+/// - 磁盘缓存（`cache/<songKey>/cover_<size>.jpg`，按尺寸分 key），仅当
+///   传入 [songKey] 时生效，app 重启后命中磁盘可跳过网络请求。
 class CoverImage extends StatefulWidget {
   final String url;
   final BoxFit fit;
@@ -57,16 +57,29 @@ class CoverImage extends StatefulWidget {
     return u;
   }
 
+  /// 从 URL 的 `?param=NNNyNNN` 提取请求尺寸；无法解析按大图（[CoverCache.maxSize]）
+  /// 处理。磁盘缓存按此尺寸分 key，避免小尺寸请求污染大尺寸槽位。
+  static int sizeFromUrl(String url) {
+    final marker = 'param=';
+    final idx = url.indexOf(marker);
+    if (idx < 0) return CoverCache.maxSize;
+    final match = RegExp(r'^(\d+)y\d+').firstMatch(url.substring(idx + marker.length));
+    if (match == null) return CoverCache.maxSize;
+    return int.parse(match.group(1)!);
+  }
+
   /// 取封面字节：命中进程内缓存直接返回，否则按 CDN 要求下载并缓存。
   /// 失败返回 null。供取色等非渲染用途复用下载/缓存逻辑。
   ///
-  /// [songKey] 可选，传入时启用磁盘缓存（`cache/<songKey>/cover.jpg`）。
+  /// [songKey] 可选，传入时启用磁盘缓存
+  /// （`cache/<songKey>/cover_<size>.jpg`，按 URL 的尺寸分 key）。
   static Future<Uint8List?> fetchBytes(
     String? rawUrl, {
     String? songKey,
   }) async {
     final fitted = normalize(rawUrl);
     if (fitted == null) return null;
+    final size = sizeFromUrl(fitted);
 
     // 1. 进程内缓存
     final memCached = CoverImageCache.instance.get(fitted);
@@ -75,7 +88,7 @@ class CoverImage extends StatefulWidget {
     // 2. 磁盘缓存
     if (songKey != null) {
       try {
-        final file = await CoverCache.instance.read(songKey);
+        final file = await CoverCache.instance.read(songKey, size);
         if (file != null) {
           final bytes = await file.readAsBytes();
           CoverImageCache.instance.put(fitted, bytes);
@@ -90,7 +103,7 @@ class CoverImage extends StatefulWidget {
       CoverImageCache.instance.put(fitted, bytes);
       // 写入磁盘缓存
       if (songKey != null) {
-        CoverCache.instance.write(songKey, bytes);
+        CoverCache.instance.write(songKey, size, bytes);
       }
       return bytes;
     } catch (_) {
