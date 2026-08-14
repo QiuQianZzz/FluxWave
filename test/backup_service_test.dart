@@ -12,11 +12,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 class MockPathProviderPlatform extends Fake
     with MockPlatformInterfaceMixin
     implements PathProviderPlatform {
-  MockPathProviderPlatform(this.supportDir);
+  MockPathProviderPlatform(this.supportDir, this.tempDir);
   final String supportDir;
+  final String tempDir;
 
   @override
   Future<String?> getApplicationSupportPath() async => supportDir;
+
+  @override
+  Future<String?> getTemporaryPath() async => tempDir;
 }
 
 /// 播放队列歌曲快照（Song.toJson 格式）。
@@ -58,6 +62,22 @@ Map<String, dynamic> _stat({
   'last_played_at': 2000,
 };
 
+/// 播放统计分桶行（playback_stat_bucket 表结构）。
+Map<String, dynamic> _bucket({
+  required int dayStart,
+  required String sourceId,
+  int playCount = 1,
+  int totalListenMs = 120000,
+}) => {
+  'day_start': dayStart,
+  'source': 'netease',
+  'source_id': sourceId,
+  'play_count': playCount,
+  'total_listen_ms': totalListenMs,
+  'first_played_at': 1000,
+  'last_played_at': 2000,
+};
+
 void main() {
   late Directory tempDir;
   late DatabaseHelper db;
@@ -78,7 +98,10 @@ void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     tempDir = await Directory.systemTemp.createTemp('backup_test_');
-    PathProviderPlatform.instance = MockPathProviderPlatform(tempDir.path);
+    PathProviderPlatform.instance = MockPathProviderPlatform(
+      tempDir.path,
+      tempDir.path,
+    );
     await DatabaseHelper.initForTest();
   });
 
@@ -507,6 +530,111 @@ void main() {
         prefs.getString('playback_quality'),
         isNull,
         reason: '备份中没有的 key 不应被写入',
+      );
+    });
+
+    test('导出含分桶表；清库后覆盖导入可完整恢复图表数据', () async {
+      final database = await db.database;
+      await database.insert('playback_stat', _stat(sourceId: '1', name: '歌曲A'));
+      await database.insert(
+        'playback_stat_bucket',
+        _bucket(dayStart: 1000000, sourceId: '1'),
+      );
+      await database.insert(
+        'playback_stat_bucket',
+        _bucket(dayStart: 2000000, sourceId: '1'),
+      );
+
+      final file = await BackupService.export(const [BackupItem.playbackStats]);
+      final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      expect(json['playback_stats'], isA<List>());
+      expect(
+        (json['playback_stats_buckets'] as List).length,
+        2,
+        reason: '分桶表应随 playbackStats 一起导出',
+      );
+
+      await database.delete('playback_stat');
+      await database.delete('playback_stat_bucket');
+      await BackupService.import(file, {
+        BackupItem.playbackStats: ConflictStrategy.overwrite,
+      });
+
+      final buckets = await database.query('playback_stat_bucket');
+      expect(buckets.length, 2, reason: '覆盖导入后分桶表应有数据（图表可用）');
+    });
+
+    test('播放记录合并：分桶表按 天|歌 去重，保留本地并追加备份独有', () async {
+      final database = await db.database;
+      await database.insert(
+        'playback_stat_bucket',
+        _bucket(dayStart: 100, sourceId: '1'),
+      );
+
+      final backup = writeBackup({
+        'playback_stats': [_stat(sourceId: '1', name: '歌曲A')],
+        'playback_stats_buckets': [
+          _bucket(dayStart: 100, sourceId: '1'), // 本地已有 → 跳过
+          _bucket(dayStart: 200, sourceId: '1'), // 备份独有（同歌不同天）→ 追加
+          _bucket(dayStart: 100, sourceId: '2'), // 备份独有 → 追加
+        ],
+      });
+      await BackupService.import(backup, {
+        BackupItem.playbackStats: ConflictStrategy.merge,
+      });
+
+      final buckets = await database.query('playback_stat_bucket');
+      expect(buckets.length, 3);
+      final keys = buckets
+          .map((b) => '${b['day_start']}|${b['source_id']}')
+          .toSet();
+      expect(keys, containsAll(['100|1', '200|1', '100|2']));
+    });
+
+    test('DB 项导入原子性：中途失败整体回滚', () async {
+      await db.addLikedSong(
+        source: 'netease',
+        sourceId: 'keep',
+        name: '本地收藏',
+        durationMs: 0,
+        fee: 0,
+        likedAtMs: 1,
+      );
+
+      final backup = writeBackup({
+        'liked_songs': [
+          {
+            'source': 'netease',
+            'source_id': 'backup',
+            'name': '备份收藏',
+            'artist': null,
+            'album': null,
+            'cover_url': null,
+            'duration_ms': 0,
+            'fee': 0,
+            'liked_at': 2,
+          },
+        ],
+        // 结构错误（非 Map 行）→ 触发事务回滚
+        'recent_plays': ['notamap'],
+      });
+      expect(
+        () => BackupService.import(backup, {
+          BackupItem.likedSongs: ConflictStrategy.overwrite,
+          BackupItem.recentPlays: ConflictStrategy.overwrite,
+        }),
+        throwsFormatException,
+      );
+
+      final liked = await db.getLikedSongs();
+      expect(
+        liked.map((s) => s.sourceId),
+        contains('keep'),
+        reason: 'recent_plays 失败时 liked_song 的覆盖也应回滚',
+      );
+      expect(
+        liked.map((s) => s.sourceId),
+        isNot(contains('backup')),
       );
     });
   });

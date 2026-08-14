@@ -896,9 +896,13 @@ class PlayerProvider extends ChangeNotifier {
     if (storage == null) return;
     try {
       final snap = await storage.load();
-      if (snap != null && snap.queue.isNotEmpty) {
-        await _restoreFromSnapshot(snap);
+      if (snap == null || snap.queue.isEmpty) {
+        // 导入为空队列（覆盖场景）：清空内存态，避免界面残留旧队列。
+        // clearQueue 本身幂等（队列已空时直接返回）。
+        await clearQueue();
+        return;
       }
+      await _restoreFromSnapshot(snap);
     } catch (e) {
       AppLog.error('恢复播放队列失败', tag: 'player', error: e);
     }

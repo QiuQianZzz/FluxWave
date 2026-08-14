@@ -30,6 +30,7 @@ class _BackupPageState extends State<BackupPage> {
   final Set<BackupItem> _selected = Set.of(BackupItem.values);
   bool _exporting = false;
   bool _importing = false;
+  bool _compactExport = true; // 紧凑模式默认开启（体积小一半）
 
   Future<void> _export() async {
     if (_selected.isEmpty) {
@@ -38,7 +39,10 @@ class _BackupPageState extends State<BackupPage> {
     }
     setState(() => _exporting = true);
     try {
-      final file = await BackupService.export(_selected.toList());
+      final file = await BackupService.export(
+        _selected.toList(),
+        prettyPrint: !_compactExport,
+      );
       if (!mounted) return;
       // 移动端：file_selector 不提供保存对话框（getSaveLocation 未实现），
       // 走系统分享面板由用户选择保存位置；桌面端弹系统保存对话框。
@@ -302,6 +306,14 @@ class _BackupPageState extends State<BackupPage> {
                     });
                   },
                 ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('美化输出'),
+                subtitle: const Text('可读性好，体积约大一倍'),
+                value: !_compactExport,
+                onChanged: (v) => setState(() => _compactExport = !v),
+              ),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,

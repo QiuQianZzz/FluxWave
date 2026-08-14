@@ -39,7 +39,10 @@ class BackupService {
   /// 导出备份文件。返回备份文件路径。
   ///
   /// [items] 选择要备份的项目。
-  static Future<File> export(List<BackupItem> items) async {
+  static Future<File> export(
+    List<BackupItem> items, {
+    bool prettyPrint = false,
+  }) async {
     final manifest = <String, dynamic>{
       'version': 1,
       'createdAt': DateTime.now().toIso8601String(),
@@ -58,6 +61,8 @@ class BackupService {
           break;
         case BackupItem.playbackStats:
           data['playback_stats'] = await _exportPlaybackStats();
+          // 趋势图表依赖的分桶聚合表一并导出，否则恢复后图表全空。
+          data['playback_stats_buckets'] = await _exportPlaybackStatBuckets();
           break;
         case BackupItem.likedSongs:
           data['liked_songs'] = await _exportLikedSongs();
@@ -68,7 +73,10 @@ class BackupService {
       }
     }
 
-    final json = const JsonEncoder.withIndent('  ').convert(data);
+    final json = (prettyPrint
+            ? const JsonEncoder.withIndent('  ')
+            : const JsonEncoder())
+        .convert(data);
     final dir = await getTemporaryDirectory();
     final ts = DateTime.now();
     final name = 'fluxwave_backup_'
@@ -354,10 +362,9 @@ class BackupService {
     final content = await file.readAsString();
     final json = jsonDecode(content) as Map<String, dynamic>;
 
+    // 非 DB 项：设置（SharedPreferences）与播放队列（JSON 文件），独立执行。
     for (final entry in resolutions.entries) {
-      final item = entry.key;
-      final strategy = entry.value;
-      switch (item) {
+      switch (entry.key) {
         case BackupItem.settings:
           if (json.containsKey('settings')) {
             await _importSettings(json['settings'] as Map<String, dynamic>);
@@ -367,36 +374,63 @@ class BackupService {
           if (json.containsKey('playlists')) {
             await _importPlaylists(
               json['playlists'] as Map<String, dynamic>,
-              strategy,
+              entry.value,
             );
           }
           break;
         case BackupItem.playbackStats:
-          if (json.containsKey('playback_stats')) {
-            await _importPlaybackStats(
-              json['playback_stats'] as List<dynamic>,
-              strategy,
-            );
-          }
-          break;
         case BackupItem.likedSongs:
-          if (json.containsKey('liked_songs')) {
-            await _importLikedSongs(
-              json['liked_songs'] as List<dynamic>,
-              strategy,
-            );
-          }
-          break;
         case BackupItem.recentPlays:
-          if (json.containsKey('recent_plays')) {
-            await _importRecentPlays(
-              json['recent_plays'] as List<dynamic>,
-              strategy,
-            );
-          }
-          break;
+          break; // DB 项统一在下方事务内执行
       }
     }
+
+    // DB 项（播放统计+分桶、收藏、最近播放）放在同一事务：任一失败整体
+    // 回滚，避免覆盖模式下清库后写入中断留下半套数据。
+    final db = await DatabaseHelper.instance.database;
+    await db.transaction((txn) async {
+      for (final entry in resolutions.entries) {
+        switch (entry.key) {
+          case BackupItem.playbackStats:
+            if (json.containsKey('playback_stats')) {
+              await _importPlaybackStats(
+                txn,
+                json['playback_stats'] as List<dynamic>,
+                entry.value,
+              );
+              if (json.containsKey('playback_stats_buckets')) {
+                await _importPlaybackStatBuckets(
+                  txn,
+                  json['playback_stats_buckets'] as List<dynamic>,
+                  entry.value,
+                );
+              }
+            }
+            break;
+          case BackupItem.likedSongs:
+            if (json.containsKey('liked_songs')) {
+              await _importLikedSongs(
+                txn,
+                json['liked_songs'] as List<dynamic>,
+                entry.value,
+              );
+            }
+            break;
+          case BackupItem.recentPlays:
+            if (json.containsKey('recent_plays')) {
+              await _importRecentPlays(
+                txn,
+                json['recent_plays'] as List<dynamic>,
+                entry.value,
+              );
+            }
+            break;
+          case BackupItem.settings:
+          case BackupItem.playlists:
+            break; // 已在事务外处理
+        }
+      }
+    });
   }
 
   // ── 导出 ──
@@ -442,6 +476,13 @@ class BackupService {
     final db = DatabaseHelper.instance;
     final database = await db.database;
     final rows = await database.query('playback_stat');
+    return rows;
+  }
+
+  static Future<List<Map<String, dynamic>>> _exportPlaybackStatBuckets() async {
+    final db = DatabaseHelper.instance;
+    final database = await db.database;
+    final rows = await database.query('playback_stat_bucket');
     return rows;
   }
 
@@ -506,14 +547,16 @@ class BackupService {
   }
 
   static Future<void> _importPlaybackStats(
+    DatabaseExecutor database,
     List<dynamic> data,
     ConflictStrategy strategy,
   ) async {
-    final db = DatabaseHelper.instance;
-    final database = await db.database;
     final existingKeys = <String>{};
     if (strategy == ConflictStrategy.merge) {
-      final rows = await database.query('playback_stat', columns: ['source', 'source_id']);
+      final rows = await database.query(
+        'playback_stat',
+        columns: ['source', 'source_id'],
+      );
       existingKeys.addAll(rows.map((r) => '${r['source']}|${r['source_id']}'));
     } else {
       await database.delete('playback_stat');
@@ -531,15 +574,49 @@ class BackupService {
     }
   }
 
-  static Future<void> _importLikedSongs(
+  /// 导入播放统计分桶表（趋势图表数据源）。
+  ///
+  /// 覆盖模式下 [playback_stat_bucket] 已在 [_importPlaybackStats] 里清空，
+  /// 这里只需按行写入；合并模式按 `day_start|source|source_id` 去重。
+  static Future<void> _importPlaybackStatBuckets(
+    DatabaseExecutor database,
     List<dynamic> data,
     ConflictStrategy strategy,
   ) async {
-    final db = DatabaseHelper.instance;
-    final database = await db.database;
     final existingKeys = <String>{};
     if (strategy == ConflictStrategy.merge) {
-      final rows = await database.query('liked_song', columns: ['source', 'source_id']);
+      final rows = await database.query(
+        'playback_stat_bucket',
+        columns: ['day_start', 'source', 'source_id'],
+      );
+      existingKeys.addAll(
+        rows.map((r) => '${r['day_start']}|${r['source']}|${r['source_id']}'),
+      );
+    }
+    for (final row in data) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final key =
+          '${map['day_start']}|${map['source']}|${map['source_id']}';
+      if (existingKeys.contains(key)) continue;
+      await database.insert(
+        'playback_stat_bucket',
+        map,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  static Future<void> _importLikedSongs(
+    DatabaseExecutor database,
+    List<dynamic> data,
+    ConflictStrategy strategy,
+  ) async {
+    final existingKeys = <String>{};
+    if (strategy == ConflictStrategy.merge) {
+      final rows = await database.query(
+        'liked_song',
+        columns: ['source', 'source_id'],
+      );
       existingKeys.addAll(rows.map((r) => '${r['source']}|${r['source_id']}'));
     } else {
       await database.delete('liked_song');
@@ -557,14 +634,16 @@ class BackupService {
   }
 
   static Future<void> _importRecentPlays(
+    DatabaseExecutor database,
     List<dynamic> data,
     ConflictStrategy strategy,
   ) async {
-    final db = DatabaseHelper.instance;
-    final database = await db.database;
     final existingKeys = <String>{};
     if (strategy == ConflictStrategy.merge) {
-      final rows = await database.query('recent_play', columns: ['source', 'source_id']);
+      final rows = await database.query(
+        'recent_play',
+        columns: ['source', 'source_id'],
+      );
       existingKeys.addAll(rows.map((r) => '${r['source']}|${r['source_id']}'));
     } else {
       await database.delete('recent_play');
