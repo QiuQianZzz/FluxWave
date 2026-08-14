@@ -10,6 +10,7 @@ import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/backup_resolve_dialog.dart';
 import '../widgets/page_scroll_view.dart';
 import '../widgets/section_card.dart';
 
@@ -86,22 +87,34 @@ class _BackupPageState extends State<BackupPage> {
     if (items == null || items.isEmpty) return;
 
     // 检查冲突
-    final existing = await BackupService.countExisting();
-    final hasConflict = items.any((item) => (existing[item] ?? 0) > 0);
+    final conflicts = await BackupService.detectConflicts(backupFile, items);
 
     if (!mounted) return;
-    ConflictStrategy? strategy;
-    if (hasConflict) {
-      strategy = await _showConflictDialog(items, existing);
-      if (strategy == null) return; // 用户取消
+    // 需要用户决策的项：检测到差异的项目（设置无差异时也无需决策）
+    final resolutions = <BackupItem, ConflictStrategy>{};
+    if (conflicts.isNotEmpty) {
+      final result = await BackupResolveDialog.show(context, conflicts);
+      if (result == null) return; // 用户取消
+      resolutions.addAll(result);
+      if (resolutions.isEmpty) {
+        if (!mounted) return;
+        AppToast.show(context, '未导入任何数据');
+        return;
+      }
     } else {
-      strategy = ConflictStrategy.merge; // 无冲突，直接合并
+      if (!mounted) return;
+      AppToast.show(context, '所选数据与本地一致');
+      return;
     }
 
-    // 二次确认（覆盖时）
-    if (strategy == ConflictStrategy.overwrite) {
+    // 二次确认（存在覆盖时）
+    final overwriteItems = [
+      for (final e in resolutions.entries)
+        if (e.value == ConflictStrategy.overwrite) e.key,
+    ];
+    if (overwriteItems.isNotEmpty) {
       if (!mounted) return;
-      final confirmed = await _showOverwriteConfirm(items);
+      final confirmed = await _showOverwriteConfirm(overwriteItems);
       if (!confirmed) return;
     }
 
@@ -117,16 +130,16 @@ class _BackupPageState extends State<BackupPage> {
     // ignore: use_build_context_synchronously
     final player = context.read<PlayerProvider>();
     try {
-      await BackupService.import(backupFile, items, strategy);
+      await BackupService.import(backupFile, resolutions);
       // 重新加载 Provider 数据（用的是 await 前捕获的引用，不经过 context）
-      if (items.contains(BackupItem.settings)) {
+      if (resolutions.containsKey(BackupItem.settings)) {
         await settings.reload();
         await theme.reload();
       }
-      if (items.contains(BackupItem.likedSongs)) {
+      if (resolutions.containsKey(BackupItem.likedSongs)) {
         liked.reload();
       }
-      if (items.contains(BackupItem.playlists)) {
+      if (resolutions.containsKey(BackupItem.playlists)) {
         // 从磁盘恢复播放队列
         await player.reloadQueue();
       }
@@ -184,55 +197,6 @@ class _BackupPageState extends State<BackupPage> {
               ],
             );
           },
-        );
-      },
-    );
-  }
-
-  Future<ConflictStrategy?> _showConflictDialog(
-    List<BackupItem> items,
-    Map<BackupItem, int> existing,
-  ) {
-    final conflictItems = items.where((i) => (existing[i] ?? 0) > 0).toList();
-    return showDialog<ConflictStrategy>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('数据冲突'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('以下项目本地已有数据：'),
-              const SizedBox(height: 8),
-              for (final item in conflictItems)
-                Text(
-                  '• ${item.label}（${existing[item]} 条）',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              const SizedBox(height: 16),
-              const Text('请选择处理方式：'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消导入'),
-            ),
-            OutlinedButton(
-              onPressed: () =>
-                  Navigator.pop(context, ConflictStrategy.merge),
-              child: const Text('合并'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, ConflictStrategy.overwrite),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-              ),
-              child: const Text('覆盖'),
-            ),
-          ],
         );
       },
     );
