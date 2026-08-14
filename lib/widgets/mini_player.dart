@@ -319,7 +319,13 @@ class _MiniPlayerState extends State<MiniPlayer>
     final cs = theme.colorScheme;
     return Row(
       children: [
-        _buildCover(cs, song.coverSmall),
+        _buildCover(
+          cs,
+          song.coverSmall,
+          songKey: '${song.source}_${song.id}',
+          // 断网加载失败后，随播放自愈成功（contentTick+1）重试小封面。
+          reloadToken: player.contentTick,
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -401,14 +407,19 @@ class _MiniPlayerState extends State<MiniPlayer>
     );
   }
 
-  Widget _buildCover(ColorScheme cs, String? cover) {
+  Widget _buildCover(ColorScheme cs, String? cover, {String? songKey, int? reloadToken}) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: SizedBox(
         width: 48,
         height: 48,
         child: cover != null && cover.isNotEmpty
-            ? CoverImage(url: cover, placeholder: _coverFallback(cs))
+            ? CoverImage(
+                url: cover,
+                songKey: songKey,
+                reloadToken: reloadToken,
+                placeholder: _coverFallback(cs),
+              )
             : _coverFallback(cs),
       ),
     );

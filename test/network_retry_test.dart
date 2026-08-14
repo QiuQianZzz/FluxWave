@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fluxwave/core/netease/netease_api.dart';
@@ -34,7 +36,7 @@ void main() {
 
   testWidgets('DNS 解析失败（errno=7）：原地重试、不跳过、保留当前曲', (tester) async {
     final api = _FakeApi(
-      songUrlImpl: () async {
+      songUrlImpl: (ids) async {
         throw NeteaseException.network(
           SocketException(
             'Failed host lookup',
@@ -81,9 +83,79 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('网络故障进入退避重试：首轮立即暂停旧曲，而非让旧歌继续播', (tester) async {
+    // 离线切未缓存歌的实测现象：UI 已切新歌/加载中，底层仍在播旧歌。
+    // 回归 Fix 1：重试前先 pause 旧曲。区分性断言 pauseCount==1——
+    // 修复前 pause 根本不会被调用（pauseCount==0）。
+    final fake = _FakeAudioPlayer();
+    final api = _FakeApi(
+      songUrlImpl: (ids) async {
+        if (ids.contains(1)) {
+          return {
+            'code': 200,
+            'data': [
+              {
+                'id': 1,
+                'url': 'https://example.com/1.mp3',
+                'br': 320000,
+                'level': 'standard',
+                'type': 'mp3',
+                'fee': 0,
+              },
+            ],
+          };
+        }
+        throw NeteaseException.network(
+          SocketException(
+            'Failed host lookup',
+            osError: const OSError('No address associated with hostname', 7),
+          ),
+          requestPath: '/api/song/enhance/player/url/v1',
+        );
+      },
+    );
+    final settings = SettingsProvider();
+    await settings.init();
+    final player = PlayerProvider(
+      netease: _FakeNeteaseProvider(api),
+      settings: settings,
+      liked: LikedSongsProvider(),
+      networkRetryAttempts: 2,
+      networkRetryBaseDelay: const Duration(milliseconds: 10),
+      playerFactory: () => fake,
+    );
+    player.init();
+
+    await tester.runAsync(() async {
+      // 先让歌 1 正常播放：底层播放器进入播放态。
+      await player.playAt([song(1)], 0);
+      expect(fake.playing, isTrue);
+      expect(player.currentSong?.id, 1);
+
+      // 切到歌 2（网络故障）：触发退避重试。
+      await player.playAt([song(2)], 0);
+      // 至少触发过重试（初始 1 轮 + 重试轮次）。
+      expect(api.songUrlCalls, greaterThan(1));
+      // Fix 1 的区分性断言：首轮失败进入重试前调用了 pause。
+      expect(fake.pauseCount, 1);
+      // 底层已暂停：pause 后 playing=false，且重试期间不再被 play 起来。
+      expect(fake.playing, isFalse);
+      expect(player.playing, isFalse);
+      // 重试耗尽后显式 stop 底层播放器（保留当前曲等自愈）。
+      expect(fake.stopCount, greaterThanOrEqualTo(1));
+      // 当前曲保留，不被自动跳过。
+      expect(player.currentSong?.id, 2);
+      // 保留错误态供 UI 提示，而非误报无版权。
+      expect(player.error, isA<NeteaseException>());
+      // 让串行化守卫挂起的补偿加载/自愈定时器在托管时间内完成。
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+  });
+
   testWidgets('无版权（接口正常但 url=null）：仍按原逻辑跳过', (tester) async {
     final api = _FakeApi(
-      songUrlImpl: () async => {
+      songUrlImpl: (ids) async => {
         'code': 200,
         'data': [
           {
@@ -161,13 +233,14 @@ void main() {
   });
 }
 
-/// 可注入 songUrl 实现的假 NeteaseApi。
+/// 可注入 songUrl 实现的假 NeteaseApi。实现接收本次请求的歌曲 id 列表，
+/// 便于按歌返回不同结果（如歌 1 正常、歌 2 网络故障）。
 class _FakeApi extends NeteaseApi {
-  _FakeApi({Future<Map<String, dynamic>> Function()? songUrlImpl})
+  _FakeApi({Future<Map<String, dynamic>> Function(List<num> ids)? songUrlImpl})
     : _impl = songUrlImpl,
       super(NeteaseClient());
 
-  final Future<Map<String, dynamic>> Function()? _impl;
+  final Future<Map<String, dynamic>> Function(List<num> ids)? _impl;
   int songUrlCalls = 0;
 
   @override
@@ -178,7 +251,7 @@ class _FakeApi extends NeteaseApi {
   }) async {
     songUrlCalls++;
     final impl = _impl;
-    if (impl != null) return impl();
+    if (impl != null) return impl(ids);
     return super.songUrl(ids, level: level, useER: useER);
   }
 }
@@ -200,4 +273,104 @@ class _FakeNeteaseProvider extends NeteaseProvider {
 
   @override
   Future<void> get initializedFuture => Future<void>.value();
+}
+
+/// 可驱动/断言的假底层播放器：覆盖 just_audio [AudioPlayer] 的全部成员，
+/// 让 PlayerProvider 在网络故障测试中走真实的暂停/停止/播放路径。
+class _FakeAudioPlayer extends AudioPlayer {
+  bool _playing = false;
+
+  int pauseCount = 0;
+  int stopCount = 0;
+  int playCount = 0;
+  int setUrlCount = 0;
+
+  int _positionMs = 0;
+  double _volume = 1.0;
+
+  final _playerStateCtrl = StreamController<PlayerState>.broadcast();
+  final _errorCtrl = StreamController<PlayerException>.broadcast();
+  final _positionCtrl = StreamController<Duration>.broadcast();
+  final _durationCtrl = StreamController<Duration?>.broadcast();
+  final _processingStateCtrl = StreamController<ProcessingState>.broadcast();
+
+  @override
+  bool get playing => _playing;
+
+  @override
+  Future<void> play() async {
+    playCount++;
+    _playing = true;
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCount++;
+    _playing = false;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCount++;
+    _playing = false;
+  }
+
+  @override
+  Future<Duration?> setUrl(
+    String url, {
+    Map<String, String>? headers,
+    Duration? initialPosition,
+    bool preload = true,
+    dynamic tag,
+  }) async {
+    setUrlCount++;
+    return Duration.zero;
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    _volume = volume;
+  }
+
+  @override
+  Future<void> seek(Duration? position, {int? index}) async {
+    _positionMs = position?.inMilliseconds ?? 0;
+  }
+
+  @override
+  Future<void> dispose() async {
+    await _playerStateCtrl.close();
+    await _errorCtrl.close();
+    await _positionCtrl.close();
+    await _durationCtrl.close();
+    await _processingStateCtrl.close();
+  }
+
+  @override
+  Stream<PlayerState> get playerStateStream => _playerStateCtrl.stream;
+
+  @override
+  Stream<PlayerException> get errorStream => _errorCtrl.stream;
+
+  @override
+  Stream<Duration> get positionStream => _positionCtrl.stream;
+
+  @override
+  Stream<Duration?> get durationStream => _durationCtrl.stream;
+
+  @override
+  Stream<ProcessingState> get processingStateStream =>
+      _processingStateCtrl.stream;
+
+  @override
+  Duration get position => Duration(milliseconds: _positionMs += 500);
+
+  @override
+  Duration? get duration => const Duration(minutes: 3);
+
+  @override
+  double get volume => _volume;
+
+  @override
+  ProcessingState get processingState => ProcessingState.ready;
 }

@@ -59,7 +59,10 @@ class PlayerProvider extends ChangeNotifier {
     PlaybackSnapshot? snapshot,
     this.networkRetryAttempts = 3,
     this.networkRetryBaseDelay = const Duration(seconds: 2),
-  }) : _initialSnapshot = snapshot;
+    // 测试可注入 fake 播放器驱动/断言播放态（见 network_retry_test）。
+    AudioPlayer Function()? playerFactory,
+  })  : _player = (playerFactory ?? AudioPlayer.new)(),
+        _initialSnapshot = snapshot;
 
   final NeteaseProvider netease;
   final SettingsProvider settings;
@@ -105,7 +108,9 @@ class PlayerProvider extends ChangeNotifier {
   /// 避免跨源同 id 歌曲串档位结论。
   final Map<(String, int), String> _fullLevelCache = {};
 
-  final AudioPlayer _player = AudioPlayer();
+  /// 底层播放器。默认真实 just_audio 实例；测试经 [PlayerProvider.playerFactory]
+  /// 注入 fake，以便驱动/断言播放态与暂停行为。
+  final AudioPlayer _player;
 
   List<Song> _queue = const [];
   int? _currentIndex;

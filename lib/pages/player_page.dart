@@ -817,7 +817,7 @@ class _LyricPanel extends StatefulWidget {
   /// 歌词字号。窄屏默认 20；宽屏按列宽自适应传入更大值。
   final double fontSize;
 
-  /// 内容重载信号：变化且上次加载失败（_failed）时重新加载歌词。
+  /// 内容重载信号：变化且当前歌词为空时重新加载（覆盖断网失败/真无歌词）。
   /// 配合 [PlayerProvider.contentTick] 在自愈续播成功后重试断网失败的歌词。
   final int? reloadToken;
 
@@ -840,9 +840,6 @@ class _LyricPanelState extends State<_LyricPanel> {
   List<LyricLine> _lines = const [];
   bool _loading = true;
 
-  /// 上次加载是否失败（如断网）：用于 reloadToken 变化时仅对失败过的歌词重试。
-  bool _failed = false;
-
   @override
   void initState() {
     super.initState();
@@ -854,7 +851,12 @@ class _LyricPanelState extends State<_LyricPanel> {
     super.didUpdateWidget(old);
     if (old.songId != widget.songId) {
       _loadLyrics();
-    } else if (old.reloadToken != widget.reloadToken && _failed) {
+    } else if (old.reloadToken != widget.reloadToken &&
+        _lines.isEmpty &&
+        !_loading) {
+      // 当前显示为空（断网加载失败 / 真无歌词）时，随播放自愈成功
+      // （contentTick+1）重新请求。不再依赖「load 抛异常」这一契约：
+      // 即使将来 LyricProvider 吞回异常，这里仍能重试。
       _loadLyrics();
     }
   }
@@ -868,7 +870,6 @@ class _LyricPanelState extends State<_LyricPanel> {
       });
       return;
     }
-    _failed = false;
     setState(() => _loading = true);
     try {
       final provider = _provider ??= LyricProvider(netease.api);
@@ -880,7 +881,6 @@ class _LyricPanelState extends State<_LyricPanel> {
         });
       }
     } catch (_) {
-      _failed = true;
       if (mounted) {
         setState(() {
           _lines = const [];
