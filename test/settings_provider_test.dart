@@ -60,8 +60,7 @@ void main() {
     expect(s3.lineLyricRevealMode, LineLyricRevealMode.staticLine);
   });
 
-  test('默认开启歌词景深模糊；切换并持久化', () async {
-    SharedPreferences.setMockInitialValues({});
+  test('默认开启歌词景深模糊；切换并持久化', () async {    SharedPreferences.setMockInitialValues({});
     final s = SettingsProvider();
     expect(s.lyricDepthBlur, isTrue);
 
@@ -79,5 +78,24 @@ void main() {
     final s3 = SettingsProvider();
     await s3.init();
     expect(s3.lyricDepthBlur, isFalse);
+  });
+
+  test('流体背景律动默认关；切换并持久化', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = SettingsProvider();
+    expect(s.fluidBeat, isFalse);
+
+    await s.init();
+    expect(s.fluidBeat, isFalse);
+
+    await s.setFluidBeat(true);
+    expect(s.fluidBeat, isTrue);
+
+    final s2 = SettingsProvider();
+    await s2.init();
+    expect(s2.fluidBeat, isTrue);
+
+    await s2.setFluidBeat(false);
+    expect(s2.fluidBeat, isFalse);
   });
 }

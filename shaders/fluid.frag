@@ -9,9 +9,10 @@ uniform float uTime;         // index 2
 // --- Custom uniforms ---
 uniform float uColorCount;   // index 3, number of palette colors (2..6)
 uniform vec4 uColors[6];     // index 4-27, palette colors (rgb used, a=weight)
-uniform float uParams[9];    // index 28-36:
+uniform float uParams[10];   // index 28-37:
 //   [0]=speed [1]=noiseScale [2]=turbulence [3]=warping
 //   [4]=deformSpeed [5]=presence [6]=uniformity [7]=smoothness [8]=darkness
+//   [9]=pulse (0..1, beat-reactive amplitude; 0 = 不律动)
 
 out vec4 fragColor;
 
@@ -102,6 +103,12 @@ void main() {
 
     float t = uTime * uParams[0];
 
+    // Beat-reactive pulse (0..1): deforms harder on each beat when enabled.
+    // pulse 自身已是每拍攻快释慢的平滑曲线，无需叠加高频振荡。
+    float pulse = uParams[9];
+    float warpBoost = 1.0 + pulse * 0.8;
+    float deformBoost = 1.0 + pulse * 0.6;
+
     // Aspect-correct coordinates so blobs stay round.
     float aspect = uResolution.x / uResolution.y;
     vec2 p = vec2(uv.x * aspect, uv.y) * uParams[1];
@@ -111,7 +118,7 @@ void main() {
     vec2 pDeformed = p + vec2(
         noise(p + vec2(deformT, 0.0)),
         noise(p + vec2(0.0, deformT))
-    ) * 0.3;
+    ) * 0.3 * deformBoost;
 
     // Global drift (visible motion).
     pDeformed += vec2(t * 0.18, t * 0.12);
@@ -121,7 +128,7 @@ void main() {
         fbm(pDeformed + vec2(0.0, 0.0) + deformT * uParams[2]),
         fbm(pDeformed + vec2(5.2, 1.3) + deformT * uParams[2])
     );
-    float h = fbm(pDeformed + uParams[3] * q);
+    float h = fbm(pDeformed + uParams[3] * warpBoost * q);
 
     // Height mapping: cycle through palette for richer colors.
     h = fract(h * uParams[5] * 0.5 + 0.5);
@@ -145,6 +152,8 @@ void main() {
     amount *= 1.0 - smoothstep(0.55, 1.1, dist) * 0.4;
 
     color = mix(base, color, clamp(amount, 0.0, 1.0));
+    // Beat pulse brightens colors slightly on each beat.
+    color *= 1.0 + pulse * 0.12;
 
     fragColor = vec4(color, 1.0);
 }

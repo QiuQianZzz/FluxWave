@@ -24,7 +24,7 @@ import '../providers/settings_provider.dart';
 class FluidBackground extends StatefulWidget {
   const FluidBackground({super.key});
 
-  /// shader 支持的最大色板颜色数（uColors[12] 数组）。
+  /// shader 支持的最大色板颜色数（uColors[6] 数组）。
   static const int kMaxColors = 6;
 
   @override
@@ -43,6 +43,18 @@ class _FluidBackgroundState extends State<FluidBackground>
   /// 已取色的封面 key（`source_id`），切歌后重新取色。
   String? _paletteSongKey;
   Timer? _paletteDebounce;
+
+  /// 律动状态（仅 [fluidBeat] 开启时使用）。
+  StreamSubscription<Duration>? _positionSub;
+  bool _beatEnabled = false;
+  final _pulse = ValueNotifier<double>(0);
+
+  /// BPM 估算（无音频数据，取流行乐常见节奏）。
+  static const double _bpm = 120;
+
+  /// 律动强度低通滤波系数（攻/释不对称，参考 NeriPlayer 的平滑策略）。
+  static const double _pulseAttack = 0.35;
+  static const double _pulseDecay = 0.06;
 
   @override
   void initState() {
@@ -64,6 +76,11 @@ class _FluidBackgroundState extends State<FluidBackground>
 
   void _onTick(Duration elapsed) {
     _time.value = elapsed.inMicroseconds / 1e6;
+    // 暂停/停止时 positionStream 不再发射，pulse 会冻结在最后值；
+    // 每帧向 0 衰减，避免暂停后背景仍在"呼吸律动"。
+    if (_beatEnabled && !context.read<PlayerProvider>().playing) {
+      _pulse.value *= 0.9;
+    }
   }
 
   /// 是否应运行动画：开关开 + 前台 + shader 就绪。
@@ -84,6 +101,37 @@ class _FluidBackgroundState extends State<FluidBackground>
     } else if (!_shouldAnimate && _ticker.isActive) {
       _ticker.stop();
     }
+  }
+
+  /// 律动开关变化：开→订阅 positionStream 推算节拍；关→取消订阅并清零脉冲。
+  void _syncBeat() {
+    final enabled =
+        settingsProvider.fluidBeat && settingsProvider.fluidBackground;
+    if (enabled == _beatEnabled) return;
+    _beatEnabled = enabled;
+    if (enabled) {
+      _positionSub ??= context
+          .read<PlayerProvider>()
+          .positionStream
+          .listen(_onPosition);
+    } else {
+      _positionSub?.cancel();
+      _positionSub = null;
+      _pulse.value = 0;
+    }
+  }
+
+  /// 根据播放进度推算节拍相位 → 脉冲强度（0..1）。
+  void _onPosition(Duration position) {
+    // 每拍时长（BPM 120 → 500ms）。
+    final beatMs = 60000 / _bpm;
+    final phase = (position.inMilliseconds % beatMs) / beatMs; // 0..1
+    // 每拍开始最强、指数衰减，模拟打击感。
+    final raw = (1 - phase) * (1 - phase);
+    // 攻快释慢的不对称平滑（避免突变，保留鼓点起伏）。
+    final current = _pulse.value;
+    final rate = raw > current ? _pulseAttack : _pulseDecay;
+    _pulse.value = current + (raw - current) * rate;
   }
 
   /// 当前歌曲 key（`source_id`）；无歌曲返回 null。
@@ -143,8 +191,10 @@ class _FluidBackgroundState extends State<FluidBackground>
   @override
   void dispose() {
     _paletteDebounce?.cancel();
+    _positionSub?.cancel();
     _ticker.dispose();
     _time.dispose();
+    _pulse.dispose();
     super.dispose();
   }
 
@@ -156,6 +206,8 @@ class _FluidBackgroundState extends State<FluidBackground>
     _maybeRefreshPalette();
     // 单一启停源：开关/前台/shader 就绪任一变化，这里都同步 ticker。
     _syncTicker();
+    // 律动：开关变化时订阅/取消 positionStream。
+    _syncBeat();
 
     final program = _program;
     final palette = _palette;
@@ -178,6 +230,7 @@ class _FluidBackgroundState extends State<FluidBackground>
             program: program,
             palette: palette,
             time: _time,
+            pulse: _pulse,
           ),
         ),
       ),
@@ -189,16 +242,18 @@ class _FluidShaderPainter extends CustomPainter {
   final ui.FragmentProgram program;
   final List<Color> palette;
   final ValueNotifier<double> time;
+  final ValueNotifier<double> pulse;
 
   _FluidShaderPainter({
     required this.program,
     required this.palette,
     required this.time,
-  }) : super(repaint: time);
+    required this.pulse,
+  }) : super(repaint: Listenable.merge([time, pulse]));
 
   /// 调优后的默认参数（原型滑杆确定的最佳观感）。
   /// 注意：deformSpeed / speed 不能太小，否则移动端动画近乎静止。
-  static const double _speed = 2.0;
+  static const double _speed = 1.5;
   static const double _noiseScale = 1.1;
   static const double _turbulence = 0.8;
   static const double _warping = 0.35;
@@ -211,7 +266,8 @@ class _FluidShaderPainter extends CustomPainter {
   static const double _darkness = 1.0;
 
   @override
-  void paint(Canvas canvas, Size size) {    final shader = program.fragmentShader();
+  void paint(Canvas canvas, Size size) {
+    final shader = program.fragmentShader();
 
     shader.getUniformVec2('uResolution').set(size.width, size.height);
     shader.getUniformFloat('uTime').set(time.value);
@@ -221,7 +277,7 @@ class _FluidShaderPainter extends CustomPainter {
         : palette.length;
     shader.getUniformFloat('uColorCount').set(n.toDouble());
     for (var i = 0; i < FluidBackground.kMaxColors; i++) {
-      // uColors 是 vec4[12] 数组：getUniformFloat(name, idx) 中 idx 是
+      // uColors 是 vec4[6] 数组：getUniformFloat(name, idx) 中 idx 是
       // "数组元素内浮点下标"，vec4 每元素占 4 个连续 float。
       final base = i * 4;
       if (i < n) {
@@ -248,6 +304,7 @@ class _FluidShaderPainter extends CustomPainter {
     p.getUniformFloat('uParams', 6).set(_uniformity);
     p.getUniformFloat('uParams', 7).set(_smoothness);
     p.getUniformFloat('uParams', 8).set(_darkness);
+    p.getUniformFloat('uParams', 9).set(pulse.value);
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),

@@ -29,6 +29,7 @@ class SettingsProvider extends ChangeNotifier {
   static const _kCheckUpdateOnStart = 'check_update_on_start';
   static const _kUpdateChannel = 'update_channel';
   static const _kFluidBackground = 'fluid_background';
+  static const _kFluidBeat = 'fluid_beat';
 
   /// 音质档位表（值 = 网易云 song/url v1 的 level 参数，label = 展示名）。
   /// 标准→较高→...→超清母带。
@@ -94,6 +95,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 全屏播放页流体背景（GPU shader）。默认开；低端设备可关闭。
   bool _fluidBackground = true;
 
+  /// 流体背景是否跟随节奏律动。默认关；仅当 [fluidBackground] 开启时生效。
+  bool _fluidBeat = false;
+
   bool get initialized => _initialized;
 
   /// 触感反馈开关（tab 切换等交互触发震动），默认开。
@@ -145,6 +149,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 全屏播放页流体背景开关（GPU shader，跟随封面取色）。
   bool get fluidBackground => _fluidBackground;
 
+  /// 流体背景是否跟随节奏律动（BPM 推算脉冲，非真实音频响应）。
+  bool get fluidBeat => _fluidBeat;
+
   /// 生效的 IP 注入开关：Android 硬门控（永不自动注入）。
   /// 显式 [NeteaseRequestContext.realIp] 仍恒生效（开发者/调试意图，不受此门控）。
   bool get realIpInjectionEnabled => _neteaseRealIp && !isAndroid;
@@ -183,6 +190,7 @@ class SettingsProvider extends ChangeNotifier {
       _checkUpdateOnStart = prefs.getBool(_kCheckUpdateOnStart) ?? true;
       _updateChannel = prefs.getString(_kUpdateChannel) ?? 'beta';
       _fluidBackground = prefs.getBool(_kFluidBackground) ?? true;
+      _fluidBeat = prefs.getBool(_kFluidBeat) ?? false;
     } catch (_) {
       // 读取失败使用默认值
     }
@@ -321,6 +329,15 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kFluidBackground, v);
+  }
+
+  /// 切换流体背景跟随节奏律动（持久化）。
+  Future<void> setFluidBeat(bool v) async {
+    if (v == _fluidBeat) return;
+    _fluidBeat = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kFluidBeat, v);
   }
 
   /// 桌面图标 id（持久化）。仅记录用户选择；实际调用 LauncherIconSwitcher

@@ -333,6 +333,7 @@ class _FluidShaderPainter extends CustomPainter {
     p.getUniformFloat('uParams', 6).set(0.55);
     p.getUniformFloat('uParams', 7).set(0.001);
     p.getUniformFloat('uParams', 8).set(darkness);
+    p.getUniformFloat('uParams', 9).set(0); // 原型不律动
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),

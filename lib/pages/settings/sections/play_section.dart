@@ -169,6 +169,19 @@ class PlaySection extends StatelessWidget {
               value: settings.fluidBackground,
               onChanged: (v) => settings.setFluidBackground(v),
             ),
+            if (settings.fluidBackground)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('跟随节奏律动'),
+                subtitle: Text(
+                  '背景随播放进度推算的节拍起伏（BPM 估算，非真实音频响应）。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                value: settings.fluidBeat,
+                onChanged: (v) => settings.setFluidBeat(v),
+              ),
           ],
         ),
         const SizedBox(height: 8),
