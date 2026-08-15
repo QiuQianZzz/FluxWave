@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -54,6 +55,18 @@ class _FluidBackgroundState extends State<FluidBackground>
   /// 当前应用的色板颜色（≤6）；null = 未就绪。
   List<Color>? _palette;
 
+  /// 色板过渡（取色/切歌完成时从旧色渐入新色）。
+  /// [_transitionStart]/[_transitionEnd] 为起止色板，
+  /// [_paletteTransitionBlend] 0→1，由 ticker 逐帧推进，避免色板突变闪烁。
+  List<Color> _transitionStart = _fallbackPalette;
+  List<Color> _transitionEnd = _fallbackPalette;
+  double _paletteTransitionBlend = 1;
+  static const Duration _paletteTransitionDuration =
+      Duration(milliseconds: 400);
+
+  /// 当前实际渲染的色板（含过渡插值）；驱动 painter 重绘。
+  final _displayPalette = ValueNotifier<List<Color>>(_fallbackPalette);
+
   /// 已取色的封面 key（`source_id`），切歌后重新取色。
   String? _paletteSongKey;
   Timer? _paletteDebounce;
@@ -90,12 +103,32 @@ class _FluidBackgroundState extends State<FluidBackground>
     }
   }
 
+  /// 上一帧 tick 时间（微秒），用于计算帧增量推进过渡。
+  int _lastTickUs = 0;
+
   void _onTick(Duration elapsed) {
     _time.value = elapsed.inMicroseconds / 1e6;
     // 暂停/停止时 positionStream 不再发射，pulse 会冻结在最后值；
     // 每帧向 0 衰减，避免暂停后背景仍在"呼吸律动"。
     if (_beatEnabled && !context.read<PlayerProvider>().playing) {
       _pulse.value *= 0.9;
+    }
+    _advancePaletteTransition(elapsed.inMicroseconds - _lastTickUs);
+    _lastTickUs = elapsed.inMicroseconds;
+  }
+
+  /// 推进色板渐变过渡：每帧把 blend 按时长推进一步，
+  /// 用插值色板驱动 painter 重绘；完成后固化目标色板。
+  void _advancePaletteTransition(int deltaUs) {
+    if (_paletteTransitionBlend >= 1) return;
+    _paletteTransitionBlend +=
+        deltaUs / _paletteTransitionDuration.inMicroseconds;
+    if (_paletteTransitionBlend >= 1) {
+      _paletteTransitionBlend = 1;
+      _displayPalette.value = List.of(_transitionEnd);
+    } else {
+      _displayPalette.value =
+          _lerpPalettes(_transitionStart, _transitionEnd, _paletteTransitionBlend);
     }
   }
 
@@ -189,10 +222,14 @@ class _FluidBackgroundState extends State<FluidBackground>
     final url = _coverUrl();
     final key = _currentSongKey();
     if (url == null) {
-      // 无歌曲/封面：清空色板。仅当状态变化且仍挂载时才重建。
+      // 无歌曲/封面：回退兜底色板。仅当状态变化且仍挂载时才重建。
       if (_palette == null) return;
-      _palette = null;
-      if (mounted) setState(() {});
+      setState(() {
+        _palette = null;
+        _transitionStart = _displayPalette.value;
+        _transitionEnd = _fallbackPalette;
+        _paletteTransitionBlend = 0;
+      });
       return;
     }
     final colors = await CoverColorExtractor.extractPalette(url, count: 6);
@@ -202,6 +239,21 @@ class _FluidBackgroundState extends State<FluidBackground>
     final palette = colors ?? const <Color>[];
     setState(() {
       _palette = palette;
+      // 从当前显示色板渐入新色板（无过渡时 blend 已 =1，直接显示目标）。
+      _transitionStart = _displayPalette.value;
+      _transitionEnd =
+          (palette.isNotEmpty) ? palette : _fallbackPalette;
+      _paletteTransitionBlend = 0;
+    });
+  }
+
+  /// 按索引逐色插值两个色板；长度不同时缺失槽位取对端该槽（平滑收尾）。
+  List<Color> _lerpPalettes(List<Color> a, List<Color> b, double t) {
+    final len = max(a.length, b.length);
+    return List<Color>.generate(len, (i) {
+      final ca = i < a.length ? a[i] : b[i];
+      final cb = i < b.length ? b[i] : a[i];
+      return Color.lerp(ca, cb, t)!;
     });
   }
 
@@ -218,6 +270,7 @@ class _FluidBackgroundState extends State<FluidBackground>
     _ticker.dispose();
     _time.dispose();
     _pulse.dispose();
+    _displayPalette.dispose();
     super.dispose();
   }
 
@@ -233,7 +286,6 @@ class _FluidBackgroundState extends State<FluidBackground>
     _syncBeat();
 
     final program = _program;
-    final palette = _palette;
 
     if (!settings.fluidBackground) {
       return const SizedBox.shrink();
@@ -244,10 +296,6 @@ class _FluidBackgroundState extends State<FluidBackground>
         color: Theme.of(context).colorScheme.surface,
       );
     }
-    // 色板未就绪时用兜底色板立即渲染流体，避免进页空白帧；
-    // 取色完成后 setState 换上新色板无缝过渡。
-    final effectivePalette =
-        (palette != null && palette.isNotEmpty) ? palette : _fallbackPalette;
 
     return RepaintBoundary(
       child: SizedBox.expand(
@@ -255,7 +303,7 @@ class _FluidBackgroundState extends State<FluidBackground>
           willChange: true,
           painter: _FluidShaderPainter(
             program: program,
-            palette: effectivePalette,
+            palette: _displayPalette,
             time: _time,
             pulse: _pulse,
           ),
@@ -267,7 +315,7 @@ class _FluidBackgroundState extends State<FluidBackground>
 
 class _FluidShaderPainter extends CustomPainter {
   final ui.FragmentProgram program;
-  final List<Color> palette;
+  final ValueNotifier<List<Color>> palette;
   final ValueNotifier<double> time;
   final ValueNotifier<double> pulse;
 
@@ -276,7 +324,7 @@ class _FluidShaderPainter extends CustomPainter {
     required this.palette,
     required this.time,
     required this.pulse,
-  }) : super(repaint: Listenable.merge([time, pulse]));
+  }) : super(repaint: Listenable.merge([palette, time, pulse]));
 
   /// 调优后的默认参数（原型滑杆确定的最佳观感）。
   /// 注意：deformSpeed / speed 不能太小，否则移动端动画近乎静止。
@@ -299,6 +347,7 @@ class _FluidShaderPainter extends CustomPainter {
     shader.getUniformVec2('uResolution').set(size.width, size.height);
     shader.getUniformFloat('uTime').set(time.value);
 
+    final palette = this.palette.value;
     final n = palette.length > FluidBackground.kMaxColors
         ? FluidBackground.kMaxColors
         : palette.length;
@@ -341,5 +390,7 @@ class _FluidShaderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_FluidShaderPainter oldDelegate) =>
-      oldDelegate.palette != palette;
+      oldDelegate.palette != palette ||
+      oldDelegate.time != time ||
+      oldDelegate.pulse != pulse;
 }
