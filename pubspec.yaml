@@ -86,6 +86,7 @@ dependencies:
   contribution_heatmap: ^0.6.0
   # 日期格式化
   intl: ^0.19.0
+  flutter_shaders_ui: ^1.1.2
 
 # sqlite3 原生库下载源：默认从 GitHub releases 下载（国内访问超时），
 # 改为走 GitHub 加速镜像。若镜像失效，可换 source: source + 本地 sqlite3.c。
@@ -121,6 +122,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  shaders:
+    - shaders/fluid.frag
 
   assets:
     # 应用图标切换的预览图（lib/core/app_icon.dart 定义）。新增图标只需放入

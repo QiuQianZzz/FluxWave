@@ -1,0 +1,251 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:provider/provider.dart';
+
+import '../core/cover_color_extractor.dart';
+import '../providers/player_provider.dart';
+import '../providers/settings_provider.dart';
+
+/// 全屏播放页流体背景。
+///
+/// 用自定义 GLSL fragment shader（`shaders/fluid.frag`）渲染"伪流体"：
+/// fbm 噪声 + 域扭曲 + 地形重塑生成流动的等高线场，从当前歌曲封面的
+/// 主色板（[CoverColorExtractor.extractPalette]）查色，得到随封面变化的
+/// 连续渐变流体（网易云 RefinedNowPlaying 风格）。
+///
+/// - 切歌防抖取色（300ms），最多取 [kMaxColors] 个主色直接作为 uniform
+///   float 数组传给 shader（不经过纹理采样，兼容 Impeller/mobile GPU）；
+/// - 动画：内部 Ticker，切后台（[TickerMode]）/ 关闭开关时自动停止；
+/// - 开关：读 [SettingsProvider.fluidBackground]，关闭时零开销。
+class FluidBackground extends StatefulWidget {
+  const FluidBackground({super.key});
+
+  /// shader 支持的最大色板颜色数（uColors[12] 数组）。
+  static const int kMaxColors = 6;
+
+  @override
+  State<FluidBackground> createState() => _FluidBackgroundState();
+}
+
+class _FluidBackgroundState extends State<FluidBackground>
+    with SingleTickerProviderStateMixin {
+  ui.FragmentProgram? _program;
+  late final Ticker _ticker;
+  final _time = ValueNotifier<double>(0);
+
+  /// 当前应用的色板颜色（≤6）；null = 未就绪。
+  List<Color>? _palette;
+
+  /// 已取色的封面 key（`source_id`），切歌后重新取色。
+  String? _paletteSongKey;
+  Timer? _paletteDebounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick);
+    _loadShader();
+  }
+
+  Future<void> _loadShader() async {
+    try {
+      final program = await ui.FragmentProgram.fromAsset('shaders/fluid.frag');
+      if (!mounted) return;
+      setState(() => _program = program);
+      _syncTicker();
+    } catch (_) {
+      // shader 加载失败（如驱动不支持）：保持空白背景，静默降级。
+    }
+  }
+
+  void _onTick(Duration elapsed) {
+    _time.value = elapsed.inMicroseconds / 1e6;
+  }
+
+  /// 是否应运行动画：开关开 + 前台 + shader 就绪。
+  bool get _shouldAnimate =>
+      // ignore: deprecated_member_use
+      TickerMode.of(context) && _program != null;
+
+  void _syncTicker() {
+    if (_shouldAnimate && !_ticker.isActive) {
+      _ticker.start();
+    } else if (!_shouldAnimate && _ticker.isActive) {
+      _ticker.stop();
+    }
+  }
+
+  /// 当前歌曲 key（`source_id`）；无歌曲返回 null。
+  String? _currentSongKey() {
+    final song = context.read<PlayerProvider>().currentSong;
+    return song != null ? '${song.source}_${song.id}' : null;
+  }
+
+  /// 当前歌曲封面 url；无歌曲返回 null。
+  String? _coverUrl() {
+    final song = context.read<PlayerProvider>().currentSong;
+    return song?.coverFor(300);
+  }
+
+  /// 切歌/封面色变化时防抖重新取色板。
+  void _maybeRefreshPalette() {
+    final key = _currentSongKey();
+    if (key == _paletteSongKey) return;
+    _paletteSongKey = key;
+    _paletteDebounce?.cancel();
+    // 测试环境跳过取色（避免 pending timer 与假封面网络请求）。
+    if (_inTest) return;
+    _paletteDebounce = Timer(const Duration(milliseconds: 300), _loadPalette);
+  }
+
+  /// 是否运行在 flutter test 环境（flutter test 总会设置 FLUTTER_TEST=true）。
+  static bool get _inTest =>
+      // ignore: avoid_web_libraries_in_flutter
+      Platform.environment.containsKey('FLUTTER_TEST');
+
+  Future<void> _loadPalette() async {
+    final url = _coverUrl();
+    final key = _currentSongKey();
+    if (url == null) {
+      _palette = null;
+      if (mounted) setState(() {});
+      return;
+    }
+    final colors = await CoverColorExtractor.extractPalette(url, count: 12);
+    if (!mounted) return;
+    // 取色期间可能已切歌：仅当 key 仍一致才应用。
+    if (_currentSongKey() != key) return;
+    final palette = colors ?? const <Color>[];
+    setState(() {
+      _palette = palette;
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncTicker();
+  }
+
+  @override
+  void dispose() {
+    _paletteDebounce?.cancel();
+    _ticker.dispose();
+    _time.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsProvider>();
+    // watch player：切歌/currentSong 变化触发 rebuild，进而刷新色板。
+    context.watch<PlayerProvider>();
+    _maybeRefreshPalette();
+
+    final program = _program;
+    final palette = _palette;
+
+    if (!settings.fluidBackground) {
+      if (_ticker.isActive) _ticker.stop();
+      return const SizedBox.shrink();
+    }
+    if (program == null || palette == null || palette.isEmpty) {
+      // 未就绪：返回纯主题背景色（避免闪烁），但不阻断动画循环等待。
+      return Container(
+        color: Theme.of(context).colorScheme.surface,
+      );
+    }
+
+    return RepaintBoundary(
+      child: SizedBox.expand(
+        child: CustomPaint(
+          willChange: true,
+          painter: _FluidShaderPainter(
+            program: program,
+            palette: palette,
+            time: _time,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FluidShaderPainter extends CustomPainter {
+  final ui.FragmentProgram program;
+  final List<Color> palette;
+  final ValueNotifier<double> time;
+
+  _FluidShaderPainter({
+    required this.program,
+    required this.palette,
+    required this.time,
+  }) : super(repaint: time);
+
+  /// 调优后的默认参数（原型滑杆确定的最佳观感）。
+  /// 注意：deformSpeed / speed 不能太小，否则移动端动画近乎静止。
+  static const double _speed = 2.0;
+  static const double _noiseScale = 1.1;
+  static const double _turbulence = 0.8;
+  static const double _warping = 0.35;
+  static const double _deformSpeed = 0.3;
+  static const double _presence = 2.0;
+  static const double _uniformity = 0.55;
+  static const double _smoothness = 0.001;
+
+  /// 音乐播放页惯例：无论系统深浅色，背景固定深色基调。
+  static const double _darkness = 1.0;
+
+  @override
+  void paint(Canvas canvas, Size size) {    final shader = program.fragmentShader();
+
+    shader.getUniformVec2('uResolution').set(size.width, size.height);
+    shader.getUniformFloat('uTime').set(time.value);
+
+    final n = palette.length > FluidBackground.kMaxColors
+        ? FluidBackground.kMaxColors
+        : palette.length;
+    shader.getUniformFloat('uColorCount').set(n.toDouble());
+    for (var i = 0; i < FluidBackground.kMaxColors; i++) {
+      // uColors 是 vec4[12] 数组：getUniformFloat(name, idx) 中 idx 是
+      // "数组元素内浮点下标"，vec4 每元素占 4 个连续 float。
+      final base = i * 4;
+      if (i < n) {
+        final c = palette[i];
+        shader.getUniformFloat('uColors', base).set(c.r);
+        shader.getUniformFloat('uColors', base + 1).set(c.g);
+        shader.getUniformFloat('uColors', base + 2).set(c.b);
+        shader.getUniformFloat('uColors', base + 3).set(1.0);
+      } else {
+        shader.getUniformFloat('uColors', base).set(0);
+        shader.getUniformFloat('uColors', base + 1).set(0);
+        shader.getUniformFloat('uColors', base + 2).set(0);
+        shader.getUniformFloat('uColors', base + 3).set(0);
+      }
+    }
+
+    final p = shader;
+    p.getUniformFloat('uParams', 0).set(_speed);
+    p.getUniformFloat('uParams', 1).set(_noiseScale);
+    p.getUniformFloat('uParams', 2).set(_turbulence);
+    p.getUniformFloat('uParams', 3).set(_warping);
+    p.getUniformFloat('uParams', 4).set(_deformSpeed);
+    p.getUniformFloat('uParams', 5).set(_presence);
+    p.getUniformFloat('uParams', 6).set(_uniformity);
+    p.getUniformFloat('uParams', 7).set(_smoothness);
+    p.getUniformFloat('uParams', 8).set(_darkness);
+
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..shader = shader,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FluidShaderPainter oldDelegate) =>
+      oldDelegate.palette != palette;
+}

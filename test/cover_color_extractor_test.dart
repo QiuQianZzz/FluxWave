@@ -55,6 +55,58 @@ void main() {
     });
   });
 
+  group('CoverColorExtractor.extractPaletteColors', () {
+    test('多色封面 → 按占比提取多主色', () {
+      // 8x8 像素：左半红、右半蓝（构造两个主色）。
+      final rgba = <int>[];
+      for (var y = 0; y < 8; y++) {
+        for (var x = 0; x < 8; x++) {
+          final c = x < 4 ? const Color(0xFFFF0000) : const Color(0xFF0000FF);
+          rgba
+            ..add((c.r * 255).round())
+            ..add((c.g * 255).round())
+            ..add((c.b * 255).round())
+            ..add(255);
+        }
+      }
+      final palette = CoverColorExtractor.extractPaletteColors(
+        rgba,
+        8,
+        8,
+        count: 4,
+      );
+      expect(palette, hasLength(4));
+      // 前两个主色应覆盖红与蓝两种色相。
+      final hues = palette.map((c) => HSLColor.fromColor(c).hue).toSet();
+      final hasRed = hues.any((h) => h < 30 || h > 330);
+      final hasBlue = hues.any((h) => h > 200 && h < 280);
+      expect(hasRed, isTrue, reason: '色板应含红色相，实际 $hues');
+      expect(hasBlue, isTrue, reason: '色板应含蓝色相，实际 $hues');
+    });
+
+    test('黑白（无彩色）封面 → 用平均色补足色板', () {
+      // 纯灰：无高饱和像素，走平均色兜底。
+      final rgba = <int>[];
+      for (var i = 0; i < 4 * 4; i++) {
+        rgba
+          ..add(200)
+          ..add(200)
+          ..add(200)
+          ..add(255);
+      }
+      final palette = CoverColorExtractor.extractPaletteColors(
+        rgba,
+        4,
+        4,
+        count: 3,
+      );
+      expect(palette, hasLength(3));
+      for (final c in palette) {
+        expect(HSLColor.fromColor(c).saturation, lessThan(0.05));
+      }
+    });
+  });
+
   group('ThemeProvider 动态取色', () {
     test('默认开启动态取色', () async {
       SharedPreferences.setMockInitialValues({});

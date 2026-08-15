@@ -153,6 +153,26 @@ class PlaySection extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         SectionCard(
+          icon: Icons.water_drop_outlined,
+          title: '播放页背景',
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('流体动态背景'),
+              subtitle: Text(
+                '全屏播放页使用 GPU 流体特效背景，颜色随专辑封面变化。'
+                '低端设备若感觉卡顿可关闭。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              value: settings.fluidBackground,
+              onChanged: (v) => settings.setFluidBackground(v),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SectionCard(
           icon: Icons.equalizer_rounded,
           title: '均衡器',
           children: [

@@ -14,6 +14,7 @@ import '../providers/player_provider.dart';
 import '../providers/liked_songs_provider.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/cover_image.dart';
+import '../widgets/fluid_background.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/lyric/lyric_layout.dart';
 import '../widgets/lyric/lyric_view.dart';
@@ -113,6 +114,8 @@ class _PlayerPageState extends State<PlayerPage>
       // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
       body: Stack(
         children: [
+          // ── 流体背景（全屏播放页底层，GPU shader，颜色跟随封面） ──
+          const Positioned.fill(child: FluidBackground()),
           // ── 内容区 ──
           isWide
               ? _buildWideContent(theme, cs, player, song, topPad)

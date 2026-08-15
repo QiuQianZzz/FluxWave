@@ -62,11 +62,70 @@ class CoverColorExtractor {
     }
   }
 
+  /// 异步提取封面色板（多主色），供流体背景等使用。
+  ///
+  /// 与 [extract] 共用同一套下载/解码/采样管线，但聚类出 [count] 个主色。
+  /// 命中进程内缓存（按 url + count 组合 key）立即返回。
+  static Future<List<Color>?> extractPalette(
+    String? rawUrl, {
+    int count = 12,
+  }) async {
+    final url = CoverImage.normalize(rawUrl);
+    if (url == null || count <= 0) return null;
+    final cacheKey = '$url#$count';
+    final hit = _paletteCache[cacheKey];
+    if (hit != null) return hit;
+
+    final bytes = await CoverImage.fetchBytes(url);
+    if (bytes == null) return null;
+
+    ui.Codec? codec;
+    ui.Image? image;
+    try {
+      codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: _kSampleSize,
+        targetHeight: _kSampleSize,
+      );
+      final frame = await codec.getNextFrame();
+      image = frame.image;
+      final width = image.width;
+      final height = image.height;
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (data == null) return null;
+      final palette = extractPaletteColors(
+        data.buffer.asUint8List(),
+        width,
+        height,
+        count: count,
+      );
+      if (palette.isEmpty) return null;
+      _putPalette(cacheKey, palette);
+      return palette;
+    } catch (_) {
+      return null;
+    } finally {
+      image?.dispose();
+      codec?.dispose();
+    }
+  }
+
   static void _put(String key, Color color) {
     if (_cache.containsKey(key)) _cache.remove(key);
     _cache[key] = color;
     while (_cache.length > _kCacheMax) {
       _cache.remove(_cache.keys.first);
+    }
+  }
+
+  static final Map<String, List<Color>> _paletteCache = {};
+  static const _kPaletteCacheMax = 32;
+
+  static void _putPalette(String key, List<Color> colors) {
+    _paletteCache.remove(key);
+    _paletteCache[key] = colors;
+    while (_paletteCache.length > _kPaletteCacheMax) {
+      _paletteCache.remove(_paletteCache.keys.first);
     }
   }
 
@@ -181,5 +240,96 @@ class CoverColorExtractor {
       );
     }
     return const Color(0xFF9C27B0);
+  }
+
+  /// 纯函数：提取封面的 [count] 个主色（可单测）。
+  ///
+  /// 思路（对齐网易云 RefinedNowPlaying 伪流体的取色）：
+  /// 1. 跳过透明/过黑/过白/过灰像素；
+  /// 2. 按色相分 24 桶累加 RGB 与饱和度，桶内主色 = RGB 均值；
+  /// 3. 对每个桶按"像素占比 + 饱和度"综合得分降序排序，取前 [count] 个；
+  /// 4. 兜底：若有效桶不足，用量化主色 / 平均色补足；再不足返回空。
+  static List<Color> extractPaletteColors(
+    List<int> rgba,
+    int width,
+    int height, {
+    int count = 12,
+  }) {
+    const bucketCount = 24;
+    final rSum = List<double>.filled(bucketCount, 0);
+    final gSum = List<double>.filled(bucketCount, 0);
+    final bSum = List<double>.filled(bucketCount, 0);
+    final satSum = List<double>.filled(bucketCount, 0);
+    final bucketCounts = List<int>.filled(bucketCount, 0);
+
+    var avgR = 0.0, avgG = 0.0, avgB = 0.0, avgN = 0;
+
+    final pixelCount = width * height;
+    for (var i = 0; i < pixelCount; i++) {
+      final o = i * 4;
+      final r = rgba[o].toDouble();
+      final g = rgba[o + 1].toDouble();
+      final b = rgba[o + 2].toDouble();
+      if (rgba[o + 3] < 128) continue;
+      avgR += r;
+      avgG += g;
+      avgB += b;
+      avgN++;
+
+      final c = Color.fromARGB(255, r.round(), g.round(), b.round());
+      final hsl = HSLColor.fromColor(c);
+      if (hsl.lightness < 0.06 ||
+          hsl.lightness > 0.94 ||
+          hsl.saturation < 0.05) {
+        continue;
+      }
+
+      final hueBucket = ((hsl.hue / 360) * bucketCount)
+          .floor()
+          .clamp(0, bucketCount - 1);
+      rSum[hueBucket] += r;
+      gSum[hueBucket] += g;
+      bSum[hueBucket] += b;
+      satSum[hueBucket] += hsl.saturation;
+      bucketCounts[hueBucket]++;
+    }
+
+    // 有效桶按"占比 + 饱和度"综合得分排序。
+    final candidates = <({int bucket, double score, Color color})>[];
+    for (var b = 0; b < bucketCount; b++) {
+      final n = bucketCounts[b];
+      if (n == 0) continue;
+      final ratio = n / (avgN > 0 ? avgN : 1);
+      final meanSat = satSum[b] / n;
+      candidates.add((
+        bucket: b,
+        score: ratio * (0.5 + meanSat),
+        color: Color.fromARGB(
+          255,
+          (rSum[b] / n).round(),
+          (gSum[b] / n).round(),
+          (bSum[b] / n).round(),
+        ),
+      ));
+    }
+    candidates.sort((a, b) => b.score.compareTo(a.score));
+
+    final result = <Color>[];
+    for (final c in candidates.take(count)) {
+      result.add(c.color);
+    }
+
+    // 兜底：用平均色补足（保证色板非空，覆盖无彩色封面如黑白照片）。
+    while (result.length < count && avgN > 0) {
+      result.add(
+        Color.fromARGB(
+          255,
+          (avgR / avgN).round(),
+          (avgG / avgN).round(),
+          (avgB / avgN).round(),
+        ),
+      );
+    }
+    return result;
   }
 }
