@@ -16,6 +16,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/fluid_background.dart';
 import '../providers/settings_provider.dart';
+import '../providers/theme_provider.dart';
 import '../widgets/lyric/lyric_layout.dart';
 import '../widgets/lyric/lyric_view.dart';
 import '../widgets/queue_sheet.dart';
@@ -101,7 +102,10 @@ class _PlayerPageState extends State<PlayerPage>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 播放页背景固定深色（流体背景深色基调），整页强制深色主题：
+    // 使所有 cs.* 引用自动变为深色主题的浅色文字/控件，避免浅色系统
+    // 主题下"深色背景 + 深色文字"看不清。
+    final theme = context.read<ThemeProvider>().darkTheme;
     final cs = theme.colorScheme;
     final player = context.watch<PlayerProvider>();
     final song = player.currentSong;
@@ -110,7 +114,9 @@ class _PlayerPageState extends State<PlayerPage>
     // 宽屏分栏（≥600）：左侧播放器 + 右侧歌词常驻，去掉滑动切换。
     final isWide = MediaQuery.sizeOf(context).width >= kWidePlayerBreakpoint;
 
-    return Scaffold(
+    return Theme(
+      data: theme,
+      child: Scaffold(
       // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
       body: Stack(
         children: [
@@ -226,6 +232,7 @@ class _PlayerPageState extends State<PlayerPage>
             ),
           ),
         ],
+      ),
       ),
     );
   }

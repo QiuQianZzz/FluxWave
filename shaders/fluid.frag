@@ -144,8 +144,15 @@ void main() {
 
     // Background blend: dark base always (player page convention).
     vec3 base = vec3(0.02, 0.02, 0.04);
-    // Keep colors visible but not overpowering content.
+    // Luminance-adaptive amount: bright sample colors (from light covers) get
+    // pushed toward the dark base so the fluid never washes out; dark covers
+    // keep their depth untouched.
     float amount = 0.85;
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    // Only genuinely bright sample colors (from light covers) get pushed toward
+    // the dark base; mid/dark covers keep their original amount untouched.
+    float lightScale = 1.0 - smoothstep(0.4, 0.9, luma) * 0.3;
+    amount *= lightScale;
     // Aspect-independent edge vignette: corner distance is always 1.
     vec2 center = uv - vec2(0.5);
     float dist = length(center) / 0.7071;
