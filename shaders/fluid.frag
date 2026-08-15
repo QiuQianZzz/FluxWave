@@ -8,8 +8,8 @@ uniform float uTime;         // index 2
 
 // --- Custom uniforms ---
 uniform float uColorCount;   // index 3, number of palette colors (2..6)
-uniform vec4 uColors[12];    // index 4-51, palette colors (rgb used, a=weight)
-uniform float uParams[9];    // index 52-60:
+uniform vec4 uColors[6];     // index 4-27, palette colors (rgb used, a=weight)
+uniform float uParams[9];    // index 28-36:
 //   [0]=speed [1]=noiseScale [2]=turbulence [3]=warping
 //   [4]=deformSpeed [5]=presence [6]=uniformity [7]=smoothness [8]=darkness
 

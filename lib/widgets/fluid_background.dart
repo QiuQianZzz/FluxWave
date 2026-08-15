@@ -67,9 +67,16 @@ class _FluidBackgroundState extends State<FluidBackground>
   }
 
   /// 是否应运行动画：开关开 + 前台 + shader 就绪。
-  bool get _shouldAnimate =>
-      // ignore: deprecated_member_use
-      TickerMode.of(context) && _program != null;
+  /// 单一启停源：`_syncTicker` 据此决定 start/stop。
+  bool get _shouldAnimate {
+    if (_program == null) return false;
+    if (!settingsProvider.fluidBackground) return false;
+    // ignore: deprecated_member_use
+    return TickerMode.of(context);
+  }
+
+  SettingsProvider get settingsProvider =>
+      context.read<SettingsProvider>();
 
   void _syncTicker() {
     if (_shouldAnimate && !_ticker.isActive) {
@@ -111,11 +118,13 @@ class _FluidBackgroundState extends State<FluidBackground>
     final url = _coverUrl();
     final key = _currentSongKey();
     if (url == null) {
+      // 无歌曲/封面：清空色板。仅当状态变化且仍挂载时才重建。
+      if (_palette == null) return;
       _palette = null;
       if (mounted) setState(() {});
       return;
     }
-    final colors = await CoverColorExtractor.extractPalette(url, count: 12);
+    final colors = await CoverColorExtractor.extractPalette(url, count: 6);
     if (!mounted) return;
     // 取色期间可能已切歌：仅当 key 仍一致才应用。
     if (_currentSongKey() != key) return;
@@ -145,12 +154,13 @@ class _FluidBackgroundState extends State<FluidBackground>
     // watch player：切歌/currentSong 变化触发 rebuild，进而刷新色板。
     context.watch<PlayerProvider>();
     _maybeRefreshPalette();
+    // 单一启停源：开关/前台/shader 就绪任一变化，这里都同步 ticker。
+    _syncTicker();
 
     final program = _program;
     final palette = _palette;
 
     if (!settings.fluidBackground) {
-      if (_ticker.isActive) _ticker.stop();
       return const SizedBox.shrink();
     }
     if (program == null || palette == null || palette.isEmpty) {
