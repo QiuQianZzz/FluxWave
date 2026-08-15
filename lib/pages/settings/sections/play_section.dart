@@ -182,6 +182,19 @@ class PlaySection extends StatelessWidget {
                 value: settings.fluidBeat,
                 onChanged: (v) => settings.setFluidBeat(v),
               ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('文字与控件对比投影'),
+              subtitle: Text(
+                '给播放页歌词、标题与图标加柔和投影，背景深浅混杂时文字控件'
+                '仍可辨认。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              value: settings.contrastShadow,
+              onChanged: (v) => settings.setContrastShadow(v),
+            ),
           ],
         ),
         const SizedBox(height: 8),

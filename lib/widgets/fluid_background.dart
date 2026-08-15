@@ -28,6 +28,11 @@ class FluidBackground extends StatefulWidget {
   /// shader 支持的最大色板颜色数（uColors[6] 数组）。
   static const int kMaxColors = 6;
 
+  /// 当前色板感知亮度（0..1，Rec.709），由本 widget 取色后更新。
+  /// 播放页据此选择浅色/深色主题，保证文字与流体背景对比度。
+  static final ValueNotifier<double> paletteBrightness =
+      ValueNotifier<double>(0);
+
   @override
   State<FluidBackground> createState() => _FluidBackgroundState();
 }
@@ -130,6 +135,22 @@ class _FluidBackgroundState extends State<FluidBackground>
       _displayPalette.value =
           _lerpPalettes(_transitionStart, _transitionEnd, _paletteTransitionBlend);
     }
+    _publishBrightness();
+  }
+
+  /// 计算当前色板感知亮度并发布到 [FluidBackground.paletteBrightness]，
+  /// 驱动播放页动态选择主题。
+  void _publishBrightness() {
+    final colors = _displayPalette.value;
+    if (colors.isEmpty) {
+      FluidBackground.paletteBrightness.value = 0;
+      return;
+    }
+    var luma = 0.0;
+    for (final c in colors) {
+      luma += 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    }
+    FluidBackground.paletteBrightness.value = luma / colors.length;
   }
 
   /// 是否应运行动画：开关开 + 前台 + shader 就绪。
