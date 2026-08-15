@@ -146,6 +146,9 @@ class _FluidBackgroundState extends State<FluidBackground>
 
   void _syncTicker() {
     if (_shouldAnimate && !_ticker.isActive) {
+      // 重置帧增量基准：ticker 重新 start 后 elapsed 从 0 累计，
+      // 若保留旧 _lastTickUs，首帧 delta 会算成负值，过渡 blend 回退。
+      _lastTickUs = 0;
       _ticker.start();
     } else if (!_shouldAnimate && _ticker.isActive) {
       _ticker.stop();
