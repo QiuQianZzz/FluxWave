@@ -37,6 +37,20 @@ class _FluidBackgroundState extends State<FluidBackground>
   late final Ticker _ticker;
   final _time = ValueNotifier<double>(0);
 
+  /// shader 程序全局缓存：播放页每次打开都会重建 [FluidBackground]，
+  /// 复用已编译的程序可省去每次进页的重新编译（asset 加载 + GLSL 编译）。
+  static Future<ui.FragmentProgram>? _programCache;
+
+  /// 色板未就绪时的内置兜底色（深蓝紫，贴合播放页深色基调）。
+  /// 进页即用它渲染流体，取色完成后无缝替换，避免空白帧。
+  static const List<Color> _fallbackPalette = [
+    Color(0xFF123052),
+    Color(0xFF1B3B6F),
+    Color(0xFF263A6E),
+    Color(0xFF37286B),
+    Color(0xFF4A2B66),
+  ];
+
   /// 当前应用的色板颜色（≤6）；null = 未就绪。
   List<Color>? _palette;
 
@@ -65,7 +79,9 @@ class _FluidBackgroundState extends State<FluidBackground>
 
   Future<void> _loadShader() async {
     try {
-      final program = await ui.FragmentProgram.fromAsset('shaders/fluid.frag');
+      // 复用全局编译好的程序：首个调用编译，之后所有播放页实例直接复用。
+      final program = await (_programCache ??=
+          ui.FragmentProgram.fromAsset('shaders/fluid.frag'));
       if (!mounted) return;
       setState(() => _program = program);
       _syncTicker();
@@ -150,11 +166,18 @@ class _FluidBackgroundState extends State<FluidBackground>
   void _maybeRefreshPalette() {
     final key = _currentSongKey();
     if (key == _paletteSongKey) return;
+    final isFirstLoad = _paletteSongKey == null;
     _paletteSongKey = key;
     _paletteDebounce?.cancel();
     // 测试环境跳过取色（避免 pending timer 与假封面网络请求）。
     if (_inTest) return;
-    _paletteDebounce = Timer(const Duration(milliseconds: 300), _loadPalette);
+    if (isFirstLoad) {
+      // 首次进入立即取色（不等待防抖），尽快用真实封面色替换兜底色。
+      _loadPalette();
+    } else {
+      // 切歌才防抖，避免连续切歌时的重复取色。
+      _paletteDebounce = Timer(const Duration(milliseconds: 300), _loadPalette);
+    }
   }
 
   /// 是否运行在 flutter test 环境（flutter test 总会设置 FLUTTER_TEST=true）。
@@ -215,12 +238,16 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (!settings.fluidBackground) {
       return const SizedBox.shrink();
     }
-    if (program == null || palette == null || palette.isEmpty) {
-      // 未就绪：返回纯主题背景色（避免闪烁），但不阻断动画循环等待。
+    if (program == null) {
+      // shader 尚未编译好：只能回退纯色背景。
       return Container(
         color: Theme.of(context).colorScheme.surface,
       );
     }
+    // 色板未就绪时用兜底色板立即渲染流体，避免进页空白帧；
+    // 取色完成后 setState 换上新色板无缝过渡。
+    final effectivePalette =
+        (palette != null && palette.isNotEmpty) ? palette : _fallbackPalette;
 
     return RepaintBoundary(
       child: SizedBox.expand(
@@ -228,7 +255,7 @@ class _FluidBackgroundState extends State<FluidBackground>
           willChange: true,
           painter: _FluidShaderPainter(
             program: program,
-            palette: palette,
+            palette: effectivePalette,
             time: _time,
             pulse: _pulse,
           ),
