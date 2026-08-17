@@ -41,7 +41,7 @@ class ReadableAccentResolver {
 
     if (isReadable(accent, inactive, bg)) return accent;
 
-    final boosted = _boost(accent, bg);
+    final boosted = _boost(accent);
     if (isReadable(boosted, inactive, bg)) return boosted;
 
     return kDarkFallback;
@@ -88,7 +88,7 @@ class ReadableAccentResolver {
   }
 
   /// 提升强调色到深色背景可读：提饱和、亮度压到亮区（深底上鲜艳且醒目）。
-  static Color _boost(Color source, Color background) {
+  static Color _boost(Color source) {
     var hsl = _hsl(source);
     // 深色背景（近黑）：目标亮度在亮区，饱和度提到下限以上。
     hsl = _HSL(
@@ -96,9 +96,7 @@ class ReadableAccentResolver {
       saturation: math.max(hsl.saturation, kBoostedMinSaturation),
       lightness: hsl.lightness.clamp(0.58, 0.74),
     );
-    final boosted = hsl.toColor();
-    // 深底检测基于相对亮度：深背景恒为暗，调整后对比度稳定达标。
-    return boosted;
+    return hsl.toColor();
   }
 
   static _HSL _hsl(Color c) {

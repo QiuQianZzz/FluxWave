@@ -81,6 +81,10 @@ class _FluidBackgroundState extends State<FluidBackground>
   bool _beatEnabled = false;
   final _pulse = ValueNotifier<double>(0);
 
+  /// 脉冲目标（positionStream 推算的每拍强度），由节流帧内 [_onTick]
+  /// 向该目标平滑推进后写入 [_pulse]。
+  double _pulseTarget = 0;
+
   /// BPM 估算（无音频数据，取流行乐常见节奏）。
   static const double _bpm = 120;
 
@@ -118,12 +122,38 @@ class _FluidBackgroundState extends State<FluidBackground>
   /// 上一帧 tick 时间（微秒），用于计算帧增量推进过渡。
   int _lastTickUs = 0;
 
+  /// 动画帧率上限（微秒），按设置档位节流：
+  /// - low：约 30fps（高刷屏显著省电）；
+  /// - balanced：约 60fps（60Hz 屏上限下不受影响）；
+  /// - high：0 表示不限速，动画跟随屏幕刷新率（120Hz 屏约 120fps）。
+  static const Map<FluidFrameRate, int> _frameIntervalUsByRate = {
+    FluidFrameRate.low: 33333,
+    FluidFrameRate.balanced: 16667,
+    FluidFrameRate.high: 0,
+  };
+
   void _onTick(Duration elapsed) {
+    // 节流：距上次刷新不足本档位帧间隔则跳过本帧，painter 不重绘。
+    // high 档（0）不限速，跟随屏幕刷新率。
+    final intervalUs = _frameIntervalUsByRate[settingsProvider.fluidFrameRate];
+    if (intervalUs != null &&
+        intervalUs > 0 &&
+        _lastTickUs != 0 &&
+        elapsed.inMicroseconds - _lastTickUs < intervalUs) {
+      return;
+    }
     _time.value = elapsed.inMicroseconds / 1e6;
-    // 暂停/停止时 positionStream 不再发射，pulse 会冻结在最后值；
+    // 暂停/停止时 positionStream 不再发射，pulse 目标冻结在最后值；
     // 每帧向 0 衰减，避免暂停后背景仍在"呼吸律动"。
     if (_beatEnabled && !context.read<PlayerProvider>().playing) {
-      _pulse.value *= 0.9;
+      _pulseTarget = 0;
+    }
+    // 在节流帧内统一向脉冲目标平滑推进：pulse 写入受帧率档位约束，
+    // positionStream（200ms 一报）不再直接触发全屏重绘。
+    if (_beatEnabled) {
+      final current = _pulse.value;
+      final rate = _pulseTarget > current ? _pulseAttack : _pulseDecay;
+      _pulse.value = current + (_pulseTarget - current) * rate;
     }
     _advancePaletteTransition(elapsed.inMicroseconds - _lastTickUs);
     _lastTickUs = elapsed.inMicroseconds;
@@ -207,20 +237,20 @@ class _FluidBackgroundState extends State<FluidBackground>
       _positionSub?.cancel();
       _positionSub = null;
       _pulse.value = 0;
+      _pulseTarget = 0;
     }
   }
 
-  /// 根据播放进度推算节拍相位 → 脉冲强度（0..1）。
+  /// 根据播放进度推算节拍相位 → 更新脉冲目标（0..1）。
+  /// 实际平滑推进在节流帧内完成（见 [_onTick]），避免 positionStream
+  /// 直接触发全屏重绘。
   void _onPosition(Duration position) {
     // 每拍时长（BPM 120 → 500ms）。
     final beatMs = 60000 / _bpm;
     final phase = (position.inMilliseconds % beatMs) / beatMs; // 0..1
     // 每拍开始最强、指数衰减，模拟打击感。
     final raw = (1 - phase) * (1 - phase);
-    // 攻快释慢的不对称平滑（避免突变，保留鼓点起伏）。
-    final current = _pulse.value;
-    final rate = raw > current ? _pulseAttack : _pulseDecay;
-    _pulse.value = current + (raw - current) * rate;
+    _pulseTarget = raw;
   }
 
   /// 当前歌曲 key（`source_id`）；无歌曲返回 null。

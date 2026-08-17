@@ -8,6 +8,18 @@ import '../core/lyric/line_lyric_reveal_mode.dart';
 import '../core/netease/netease_config.dart';
 import '../core/platform_utils.dart';
 
+/// 流体背景动画帧率档位。上限受设备屏幕刷新率约束。
+enum FluidFrameRate {
+  /// 省电（约 30fps）。
+  low,
+
+  /// 均衡（约 60fps）。
+  balanced,
+
+  /// 流畅（跟随屏幕刷新率，高刷屏可到 120fps+，功耗更高）。
+  high,
+}
+
 /// 应用级设置 Provider（仿 ThemeProvider）：持久化网络/风控开关，
 /// 并同步写入 [NeteaseConfig] 供纯 Dart 请求层读取。
 ///
@@ -30,6 +42,7 @@ class SettingsProvider extends ChangeNotifier {
   static const _kUpdateChannel = 'update_channel';
   static const _kFluidBackground = 'fluid_background';
   static const _kFluidBeat = 'fluid_beat';
+  static const _kFluidFrameRate = 'fluid_frame_rate';
 
   /// 音质档位表（值 = 网易云 song/url v1 的 level 参数，label = 展示名）。
   /// 标准→较高→...→超清母带。
@@ -98,6 +111,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 流体背景是否跟随节奏律动。默认关；仅当 [fluidBackground] 开启时生效。
   bool _fluidBeat = false;
 
+  /// 流体背景动画帧率档位。默认均衡（60fps）。
+  FluidFrameRate _fluidFrameRate = FluidFrameRate.balanced;
+
   bool get initialized => _initialized;
 
   /// 触感反馈开关（tab 切换等交互触发震动），默认开。
@@ -152,6 +168,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 流体背景跟随节奏律动。
   bool get fluidBeat => _fluidBeat;
 
+  /// 流体背景动画帧率档位。
+  FluidFrameRate get fluidFrameRate => _fluidFrameRate;
+
   /// 生效的 IP 注入开关：Android 硬门控（永不自动注入）。
   /// 显式 [NeteaseRequestContext.realIp] 仍恒生效（开发者/调试意图，不受此门控）。
   bool get realIpInjectionEnabled => _neteaseRealIp && !isAndroid;
@@ -191,6 +210,10 @@ class SettingsProvider extends ChangeNotifier {
       _updateChannel = prefs.getString(_kUpdateChannel) ?? 'beta';
       _fluidBackground = prefs.getBool(_kFluidBackground) ?? true;
       _fluidBeat = prefs.getBool(_kFluidBeat) ?? false;
+      _fluidFrameRate = FluidFrameRate.values.firstWhere(
+        (e) => e.name == prefs.getString(_kFluidFrameRate),
+        orElse: () => FluidFrameRate.balanced,
+      );
     } catch (_) {
       // 读取失败使用默认值
     }
@@ -338,6 +361,15 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kFluidBeat, v);
+  }
+
+  /// 切换流体背景动画帧率档位（持久化）。
+  Future<void> setFluidFrameRate(FluidFrameRate v) async {
+    if (v == _fluidFrameRate) return;
+    _fluidFrameRate = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kFluidFrameRate, v.name);
   }
 
   /// 桌面图标 id（持久化）。仅记录用户选择；实际调用 LauncherIconSwitcher

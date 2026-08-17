@@ -15,6 +15,17 @@ class PlaySection extends StatelessWidget {
 
   static Widget builder(BuildContext context) => const PlaySection();
 
+  /// 各帧率档位的说明文案。
+  static String _fluidFrameRateHint(FluidFrameRate rate) => switch (rate) {
+        FluidFrameRate.low =>
+          '约 30fps，最省电、发热最低；流体流动偏慢，日常浏览足够。',
+        FluidFrameRate.balanced =>
+          '约 60fps，省电与流畅兼顾，多数设备推荐。',
+        FluidFrameRate.high =>
+          '不设上限，跟随屏幕刷新率（120Hz 屏约 120fps，60Hz 屏约 60fps）；'
+              '动画最流畅，功耗最高，发热或卡顿可降低档位。',
+      };
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -181,6 +192,80 @@ class PlaySection extends StatelessWidget {
                 ),
                 value: settings.fluidBeat,
                 onChanged: (v) => settings.setFluidBeat(v),
+              ),
+            if (settings.fluidBackground)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final narrow = constraints.maxWidth < 440;
+                    final button = SegmentedButton<FluidFrameRate>(
+                      segments: const [
+                        ButtonSegment(
+                          value: FluidFrameRate.low,
+                          label: Text('省电'),
+                        ),
+                        ButtonSegment(
+                          value: FluidFrameRate.balanced,
+                          label: Text('均衡'),
+                        ),
+                        ButtonSegment(
+                          value: FluidFrameRate.high,
+                          label: Text('流畅'),
+                        ),
+                      ],
+                      selected: {settings.fluidFrameRate},
+                      onSelectionChanged: (s) =>
+                          settings.setFluidFrameRate(s.first),
+                      showSelectedIcon: false,
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity(
+                          horizontal: -1,
+                          vertical: -1,
+                        ),
+                      ),
+                    );
+                    // 标题 + 副标题（描述），与其他设置项 subtitle 风格一致。
+                    final label = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('动画帧率', style: theme.textTheme.bodyMedium),
+                        const SizedBox(height: 2),
+                        Text(
+                          _fluidFrameRateHint(settings.fluidFrameRate),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    );
+                    if (narrow) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          label,
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: button,
+                          ),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(flex: 2, child: label),
+                        Expanded(
+                          flex: 3,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: button,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
           ],
         ),

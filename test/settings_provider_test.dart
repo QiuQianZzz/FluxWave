@@ -98,4 +98,23 @@ void main() {
     await s2.setFluidBeat(false);
     expect(s2.fluidBeat, isFalse);
   });
+
+  test('流体帧率默认均衡；切换并持久化', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = SettingsProvider();
+    expect(s.fluidFrameRate, FluidFrameRate.balanced);
+
+    await s.init();
+    expect(s.fluidFrameRate, FluidFrameRate.balanced);
+
+    await s.setFluidFrameRate(FluidFrameRate.high);
+    expect(s.fluidFrameRate, FluidFrameRate.high);
+
+    final s2 = SettingsProvider();
+    await s2.init();
+    expect(s2.fluidFrameRate, FluidFrameRate.high);
+
+    await s2.setFluidFrameRate(FluidFrameRate.low);
+    expect(s2.fluidFrameRate, FluidFrameRate.low);
+  });
 }
