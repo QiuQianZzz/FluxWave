@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' show Color;
 
+import 'package:flutter/material.dart' show HSLColor;
+
 /// 播放页强调色的可读性修正。
 ///
 /// 播放页固定深色背景（流体背景压在近黑底色上），文字用深色主题的浅色
@@ -43,6 +45,29 @@ class ReadableAccentResolver {
     if (isReadable(boosted, inactive, bg)) return boosted;
 
     return kDarkFallback;
+  }
+
+  /// 流体背景色板压暗：明度 [threshold] 以上的颜色压缩到暗区间
+  /// [minLightness, maxLightness]（保留色相与饱和），保证浅色/白色封面
+  /// 背景下文字仍可读；深色封面原样通过，观感不变。
+  static Color darkenForBackground(
+    Color color, {
+    double threshold = 0.40,
+    double minLightness = 0.20,
+    double maxLightness = 0.30,
+  }) {
+    final hsl = HSLColor.fromColor(color);
+    if (hsl.lightness <= threshold) return color;
+    // 0.40..1.0 → min..max 线性映射。
+    final t = (hsl.lightness - threshold) / (1.0 - threshold);
+    final target =
+        minLightness + (maxLightness - minLightness) * t.clamp(0.0, 1.0);
+    return HSLColor.fromAHSL(
+      hsl.alpha,
+      hsl.hue,
+      hsl.saturation,
+      target,
+    ).toColor();
   }
 
   /// 可读性检测：饱和度足 + 背景对比度足 + 与 inactive 文字差异足。

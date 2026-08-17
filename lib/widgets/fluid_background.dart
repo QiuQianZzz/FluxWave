@@ -275,7 +275,10 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (!mounted) return;
     // 取色期间可能已切歌：仅当 key 仍一致才应用。
     if (_currentSongKey() != key) return;
-    final palette = colors ?? const <Color>[];
+    // 过亮封面（白/超浅色）压暗背景色板，保证白字可读；深色封面原样通过。
+    final palette = colors == null
+        ? const <Color>[]
+        : colors.map(ReadableAccentResolver.darkenForBackground).toList();
     setState(() {
       _palette = palette;
       // 从当前显示色板渐入新色板（无过渡时 blend 已 =1，直接显示目标）。
