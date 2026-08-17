@@ -147,9 +147,10 @@ void main() {
     // Keep colors visible but not overpowering content.
     float amount = 0.85;
     // Aspect-independent edge vignette: corner distance is always 1.
+    // 轻量压暗即可（0.25），避免四角明显发黑。
     vec2 center = uv - vec2(0.5);
     float dist = length(center) / 0.7071;
-    amount *= 1.0 - smoothstep(0.55, 1.1, dist) * 0.4;
+    amount *= 1.0 - smoothstep(0.55, 1.1, dist) * 0.25;
 
     color = mix(base, color, clamp(amount, 0.0, 1.0));
     // Beat pulse brightens colors slightly on each beat.
