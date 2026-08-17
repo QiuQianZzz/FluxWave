@@ -24,6 +24,15 @@ void main() {
       expect(HSLColor.fromColor(d).hue, closeTo(212.7, 5.0));
     });
 
+    test('过亮高饱和颜色同时压饱和，避免暗底发浊', () {
+      // 亮红（高饱和）：压暗后饱和 ≤ 上限 0.35。
+      const brightRed = Color(0xFFFF4444);
+      final d = ReadableAccentResolver.darkenForBackground(brightRed);
+      final hsl = HSLColor.fromColor(d);
+      expect(hsl.saturation, lessThanOrEqualTo(0.35 + 1e-9));
+      expect(hsl.lightness, inInclusiveRange(0.18, 0.35));
+    });
+
     test('阈值以下的封面不动', () {
       // lightness ≈ 0.35 < 阈值 0.40，原样通过。
       const midDark = Color(0xFF335A80);

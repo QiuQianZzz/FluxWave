@@ -53,8 +53,9 @@ class ReadableAccentResolver {
   static Color darkenForBackground(
     Color color, {
     double threshold = 0.40,
-    double minLightness = 0.20,
-    double maxLightness = 0.30,
+    double minLightness = 0.22,
+    double maxLightness = 0.33,
+    double maxSaturation = 0.35,
   }) {
     final hsl = HSLColor.fromColor(color);
     if (hsl.lightness <= threshold) return color;
@@ -62,10 +63,12 @@ class ReadableAccentResolver {
     final t = (hsl.lightness - threshold) / (1.0 - threshold);
     final target =
         minLightness + (maxLightness - minLightness) * t.clamp(0.0, 1.0);
+    // 同时压饱和：暗底上高饱和会发浊（脏），压到上限保留干净色调。
+    final saturation = math.min(hsl.saturation, maxSaturation);
     return HSLColor.fromAHSL(
       hsl.alpha,
       hsl.hue,
-      hsl.saturation,
+      saturation,
       target,
     ).toColor();
   }
