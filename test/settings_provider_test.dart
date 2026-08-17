@@ -98,23 +98,4 @@ void main() {
     await s2.setFluidBeat(false);
     expect(s2.fluidBeat, isFalse);
   });
-
-  test('对比投影默认开；切换并持久化', () async {
-    SharedPreferences.setMockInitialValues({});
-    final s = SettingsProvider();
-    expect(s.contrastShadow, isTrue);
-
-    await s.init();
-    expect(s.contrastShadow, isTrue);
-
-    await s.setContrastShadow(false);
-    expect(s.contrastShadow, isFalse);
-
-    final s2 = SettingsProvider();
-    await s2.init();
-    expect(s2.contrastShadow, isFalse);
-
-    await s2.setContrastShadow(true);
-    expect(s2.contrastShadow, isTrue);
-  });
 }

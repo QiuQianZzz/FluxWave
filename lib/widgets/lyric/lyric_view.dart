@@ -26,10 +26,6 @@ class LyricView extends StatefulWidget {
   final Color inactiveColor;
   final double fontSize;
 
-  /// 歌词文字柔和对比投影（字幕式，与主题文字方向相反），保证在流体背景
-  /// 深浅混杂区域可读。随主题方向切换，传入时应同步失效排版缓存。
-  final List<Shadow> shadows;
-
   /// 歌词时间偏移毫秒（正 = 提前，负 = 延后）。
   final int lyricOffsetMs;
 
@@ -57,7 +53,6 @@ class LyricView extends StatefulWidget {
     required this.activeColor,
     required this.inactiveColor,
     this.fontSize = 20,
-    this.shadows = const [],
     this.lyricOffsetMs = 0,
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
@@ -150,9 +145,7 @@ class _LyricViewState extends State<LyricView> {
   void didUpdateWidget(covariant LyricView old) {
     super.didUpdateWidget(old);
     final metricsChanged =
-        old.fontSize != widget.fontSize ||
-        old.activeColor != widget.activeColor ||
-        !identical(old.shadows, widget.shadows);
+        old.fontSize != widget.fontSize || old.activeColor != widget.activeColor;
     if (old.lines != widget.lines) {
       _currentIndex = -1;
       _needsJump = true;
@@ -380,7 +373,6 @@ class _LyricViewState extends State<LyricView> {
         style: style,
         availableWidth: width,
         glowColor: widget.activeColor,
-        shadows: widget.shadows,
       );
     }
     return _layoutCache[index]!;
@@ -431,7 +423,6 @@ class _LyricViewState extends State<LyricView> {
             context,
           ).textTheme.bodyMedium?.copyWith(
             color: widget.inactiveColor,
-            shadows: widget.shadows.isEmpty ? null : widget.shadows,
           ),
         ),
       );
@@ -636,7 +627,6 @@ class _LyricViewState extends State<LyricView> {
                           fontSize: widget.fontSize,
                           translationFontSize: widget.fontSize * 0.7,
                           showTranslation: widget.showTranslation,
-                          shadows: widget.shadows,
                           lineLyricRevealMode: widget.lineLyricRevealMode,
                           leadingDots: showDots ? leadingDots : null,
                           onTapLine: widget.onSeekLine == null

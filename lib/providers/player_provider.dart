@@ -675,9 +675,8 @@ class PlayerProvider extends ChangeNotifier {
 
   /// 可恢复的流式播放错误：网络/IO 类（Android Media3 errorCode 2000xxx）。
   ///
-  /// 参考 NeriPlayer 的 `shouldAttemptUrlRefresh`：网络连接失败/超时、HTTP
-  /// 状态错误属于瞬时故障，URL 失效可刷新重试；解析/解码/格式类错误不可恢复，
-  /// 重试也会复现，走原错误路径。
+  /// 网络连接失败/超时、HTTP 状态错误属于瞬时故障，URL 失效可刷新重试；
+  /// 解析/解码/格式类错误不可恢复，重试也会复现，走原错误路径。
   static bool _isRecoverableStreamError(PlayerException e) {
     return isRecoverableStreamErrorCode(e.code);
   }
@@ -2077,9 +2076,8 @@ class PlayerProvider extends ChangeNotifier {
 
 /// 判断 Media3 播放错误码是否为可恢复的网络/IO 类。
 ///
-/// 参考 NeriPlayer 的 `shouldAttemptUrlRefresh`：网络连接失败/超时、HTTP 状态
-/// 错误属于瞬时故障，URL 失效可刷新重试；解析/解码/格式类错误不可恢复，重试
-/// 也会复现，走原错误路径。
+/// 网络连接失败/超时、HTTP 状态错误属于瞬时故障，URL 失效可刷新重试；
+/// 解析/解码/格式类错误不可恢复，重试也会复现，走原错误路径。
 @visibleForTesting
 bool isRecoverableStreamErrorCode(int code) {
   // code 未定义（<=0 或未知）：保守不恢复。

@@ -36,9 +36,6 @@ class LyricLineView extends StatelessWidget {
   final VoidCallback? onLongPressLine;
   final bool showTranslation;
 
-  /// 翻译行柔和对比投影；空列表 = 不投影。
-  final List<Shadow> shadows;
-
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 不受影响。
   final LineLyricRevealMode lineLyricRevealMode;
 
@@ -58,7 +55,6 @@ class LyricLineView extends StatelessWidget {
     this.onTapLine,
     this.onLongPressLine,
     this.showTranslation = true,
-    this.shadows = const [],
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
     this.leadingDots,
   });
@@ -111,15 +107,6 @@ class LyricLineView extends StatelessWidget {
                     ? activeColor.withValues(alpha: 0.85)
                     : inactiveColor.withValues(alpha: 0.7),
                 fontWeight: FontWeight.w400,
-                shadows: shadows.isEmpty
-                    ? null
-                    : [
-                        Shadow(
-                          color: shadows.first.color.withValues(alpha: 0.35),
-                          blurRadius: 3,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
               ),
             ),
           ),

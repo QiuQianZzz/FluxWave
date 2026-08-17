@@ -710,14 +710,8 @@ LyricLineLayout measureLyricLine({
   required TextStyle style,
   required double availableWidth,
   Color? glowColor,
-  List<Shadow>? shadows,
 }) {
-  // 对比投影：一次性并入基准 style，后续所有 _measure/发光层自然继承。
-  final baseStyle =
-      (shadows != null && shadows.isNotEmpty)
-          ? style.copyWith(shadows: shadows)
-          : style;
-  final spaceWidth = _measure(' ', baseStyle).width;
+  final spaceWidth = _measure(' ', style).width;
   final syllables = resolveSyllables(line);
   if (syllables.isEmpty) {
     return const LyricLineLayout(rows: [], totalHeight: 0);
@@ -725,7 +719,7 @@ LyricLineLayout measureLyricLine({
 
   final measured = measureSyllablesAndDetermineAnimation(
     syllables: syllables,
-    style: baseStyle,
+    style: style,
     spaceWidth: spaceWidth,
     glowColor: glowColor,
     // LRC（无逐字时间轴）不启用 awesome 逐字动画，只走简单浮动/静态揭示。
@@ -734,14 +728,14 @@ LyricLineLayout measureLyricLine({
   // 行高：`normalTextStyle.lineHeight = fontSize * 1.18`，
   // 但不得低于实际字体度量，避免 CJK 等被裁切。
   final lineHeight = math.max(
-    _measure('M', baseStyle).height,
+    _measure('M', style).height,
     (style.fontSize ?? 18) * 1.18,
   );
 
   final wrapped = calculateBalancedLines(
     syllableLayouts: measured,
     availableWidth: availableWidth,
-    style: baseStyle,
+    style: style,
   );
   if (wrapped.isEmpty) {
     return const LyricLineLayout(rows: [], totalHeight: 0);

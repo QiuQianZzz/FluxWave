@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
+import '../core/color_readability.dart';
 import '../core/cover_color_extractor.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
@@ -28,10 +29,9 @@ class FluidBackground extends StatefulWidget {
   /// shader 支持的最大色板颜色数（uColors[6] 数组）。
   static const int kMaxColors = 6;
 
-  /// 当前色板感知亮度（0..1，Rec.709），由本 widget 取色后更新。
-  /// 播放页据此选择浅色/深色主题，保证文字与流体背景对比度。
-  static final ValueNotifier<double> paletteBrightness =
-      ValueNotifier<double>(0);
+  /// 当前封面强调色（经可读性修正，深色背景可用）。由色板稳定后发布，
+  /// 播放页据此渲染控件/歌词强调色（null = 未就绪，回退主题 primary）。
+  static final ValueNotifier<Color?> accentColor = ValueNotifier<Color?>(null);
 
   @override
   State<FluidBackground> createState() => _FluidBackgroundState();
@@ -84,7 +84,7 @@ class _FluidBackgroundState extends State<FluidBackground>
   /// BPM 估算（无音频数据，取流行乐常见节奏）。
   static const double _bpm = 120;
 
-  /// 律动强度低通滤波系数（攻/释不对称，参考 NeriPlayer 的平滑策略）。
+  /// 律动强度低通滤波系数（攻/释不对称）。
   static const double _pulseAttack = 0.35;
   static const double _pulseDecay = 0.06;
 
@@ -93,6 +93,12 @@ class _FluidBackgroundState extends State<FluidBackground>
     super.initState();
     _ticker = createTicker(_onTick);
     _loadShader();
+    // 首帧后发布兜底色板的强调色，播放页无需等待取色完成。
+    // 延迟到 post-frame：避免父级 build 期间监听者被通知。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _publishAccent(_fallbackPalette);
+    });
   }
 
   Future<void> _loadShader() async {
@@ -131,26 +137,35 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (_paletteTransitionBlend >= 1) {
       _paletteTransitionBlend = 1;
       _displayPalette.value = List.of(_transitionEnd);
+      _publishAccent(_transitionEnd);
     } else {
       _displayPalette.value =
           _lerpPalettes(_transitionStart, _transitionEnd, _paletteTransitionBlend);
     }
-    _publishBrightness();
   }
 
-  /// 计算当前色板感知亮度并发布到 [FluidBackground.paletteBrightness]，
-  /// 驱动播放页动态选择主题。
-  void _publishBrightness() {
-    final colors = _displayPalette.value;
-    if (colors.isEmpty) {
-      FluidBackground.paletteBrightness.value = 0;
+  /// 从稳定色板挑选强调候选：饱和度最高且明度居中（接近 vibrant），
+  /// 经可读性修正后发布到 [FluidBackground.accentColor]。
+  void _publishAccent(List<Color> palette) {
+    if (palette.isEmpty) {
+      FluidBackground.accentColor.value = null;
       return;
     }
-    var luma = 0.0;
-    for (final c in colors) {
-      luma += 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    Color? best;
+    var bestScore = -1.0;
+    for (final c in palette) {
+      final hsl = HSLColor.fromColor(c);
+      // 跳过过暗/过亮（对强调贡献低），饱和度 + 明度居中得分。
+      if (hsl.lightness < 0.18 || hsl.lightness > 0.85) continue;
+      final score = hsl.saturation - (hsl.lightness - 0.5).abs() * 0.6;
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
     }
-    FluidBackground.paletteBrightness.value = luma / colors.length;
+    final candidate = best ?? palette.first;
+    FluidBackground.accentColor.value =
+        ReadableAccentResolver.resolve(candidate);
   }
 
   /// 是否应运行动画：开关开 + 前台 + shader 就绪。

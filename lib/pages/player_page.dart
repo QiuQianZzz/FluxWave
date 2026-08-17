@@ -33,50 +33,6 @@ const kWidePlayerBreakpoint = 600.0;
 /// 宽屏进度条以此为上限，避免轨道拉伸到整栏宽。
 const kWideControlsWidth = 264.0;
 
-/// 柔和对比投影：给文字加与自身颜色相反的柔光，保证在任意背景
-/// （流体深浅区域混杂）上都有可读性。
-/// 浅色主题（文字偏深）→ 白投影；深色主题（文字偏浅）→ 黑投影。
-/// [enabled] 为 false（设置里关闭该开关）时返回空列表，恢复无投影。
-List<Shadow> _contrastShadows(ThemeData theme, {bool enabled = true}) {
-  if (!enabled) return const [];
-  final dark = theme.brightness == Brightness.dark;
-  return [
-    Shadow(
-      color: (dark ? Colors.black : Colors.white).withValues(alpha: 0.35),
-      blurRadius: 3,
-      offset: const Offset(0, 1),
-    ),
-  ];
-}
-
-/// 带对比投影的图标：`Icon` 不支持 shadow，改以 [Stack] 底层独立偏移字形
-/// 渲染阴影。
-///
-/// 不用 `TextStyle.shadows` 挂在 glyph 上：Impeller 在切换/滚动合成时会把
-/// glyph 阴影画成不跟随的 ghost（flutter/flutter#187361）。底层偏移字形
-/// 是独立 widget，随控件一起布局移动，无此问题。
-Widget _shadowedIcon(
-  IconData icon, {
-  required double size,
-  required Color color,
-  required List<Shadow> shadows,
-}) {
-  if (shadows.isEmpty) {
-    return Icon(icon, size: size, color: color);
-  }
-  return Stack(
-    alignment: Alignment.center,
-    children: [
-      for (final s in shadows)
-        Transform.translate(
-          offset: s.offset,
-          child: Icon(icon, size: size, color: s.color),
-        ),
-      Icon(icon, size: size, color: color),
-    ],
-  );
-}
-
 /// 全屏播放页：点迷你栏展开（自底部滑入）。
 ///
 /// 沉浸式，集中展示：大封面 / 歌名 / 歌手 / 试听提示 / 带波浪的进度条 /
@@ -148,26 +104,29 @@ class _PlayerPageState extends State<PlayerPage>
   Widget build(BuildContext context) {
     final themeProvider = context.read<ThemeProvider>();
     final player = context.watch<PlayerProvider>();
-    // 流体背景颜色随封面变化：根据当前色板亮度动态选择主题。
-    // 浅色背景（亮色封面）→ 浅色主题（深色文字/控件），保证对比度；
-    // 深色背景 → 深色主题（浅色文字）。亮度由 FluidBackground 发布。
-    return ListenableBuilder(
-      listenable: FluidBackground.paletteBrightness,
-      builder: (context, _) {
-        final isLight = FluidBackground.paletteBrightness.value > 0.5;
-        final theme = isLight
-            ? themeProvider.lightTheme
-            : themeProvider.darkTheme;
-        final cs = theme.colorScheme;
-        final song = player.currentSong;
-        final sysTopPad = MediaQuery.paddingOf(context).top;
-        final topPad = sysTopPad + _extraTop(context);
-        // 宽屏分栏（≥600）：左侧播放器 + 右侧歌词常驻，去掉滑动切换。
-        final isWide = MediaQuery.sizeOf(context).width >= kWidePlayerBreakpoint;
+    // 播放页固定深色主题（音乐播放页惯例）：流体背景始终压在近黑底色上，
+    // 文字/控件用深色主题下的浅色（onSurface 白 / onSurfaceVariant 浅灰），
+    // 保证任意封面下都清晰可读。亮色封面只影响背景点缀与强调色，不切换主题。
+    final theme = themeProvider.darkTheme;
+    final song = player.currentSong;
+    final sysTopPad = MediaQuery.paddingOf(context).top;
+    final topPad = sysTopPad + _extraTop(context);
+    // 宽屏分栏（≥600）：左侧播放器 + 右侧歌词常驻，去掉滑动切换。
+    final isWide = MediaQuery.sizeOf(context).width >= kWidePlayerBreakpoint;
 
+    // 强调色覆盖：封面取色 → 可读性修正 → 作为 primary 注入主题，
+    // 播放按钮/进度条/歌词高亮统一使用。未就绪回退深色主题 primary。
+    return ValueListenableBuilder<Color?>(
+      valueListenable: FluidBackground.accentColor,
+      builder: (context, accent, _) {
+        final resolvedAccent = accent ?? theme.colorScheme.primary;
+        final accentTheme = theme.copyWith(
+          colorScheme: theme.colorScheme.copyWith(primary: resolvedAccent),
+        );
+        final cs = accentTheme.colorScheme;
         return Theme(
-          data: theme,
-          child: Scaffold(
+      data: accentTheme,
+      child: Scaffold(
       // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
       body: Stack(
         children: [
@@ -286,7 +245,7 @@ class _PlayerPageState extends State<PlayerPage>
       ),
       ),
     );
-  },
+      },
     );
   }
   /// 当前是否为移动平台（Android/iOS）。
@@ -312,7 +271,6 @@ class _PlayerPageState extends State<PlayerPage>
     Song? song,
     double topPad,
   ) {
-    final shadowEnabled = context.watch<SettingsProvider>().contrastShadow;
     final extraBottom = _extraBottom(context);
     final backBtnSize = 48.0;
 
@@ -358,10 +316,6 @@ class _PlayerPageState extends State<PlayerPage>
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleLarge?.copyWith(
                                 fontWeight: FontWeight.w600,
-                                shadows: _contrastShadows(
-                                  theme,
-                                  enabled: shadowEnabled,
-                                ),
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -375,10 +329,6 @@ class _PlayerPageState extends State<PlayerPage>
                                 color: player.isTrial
                                     ? cs.error
                                     : cs.onSurfaceVariant,
-                                shadows: _contrastShadows(
-                                  theme,
-                                  enabled: shadowEnabled,
-                                ),
                               ),
                             ),
                             const SizedBox(height: 28),
@@ -444,7 +394,6 @@ class _PlayerPageState extends State<PlayerPage>
     double t,
     double topPad,
   ) {
-    final shadowEnabled = context.watch<SettingsProvider>().contrastShadow;
     final coverLarge = _coverSizeLarge(context);
     final coverSmall = _coverSizeCompact(context);
     final coverSize = coverLarge + (coverSmall - coverLarge) * t;
@@ -560,10 +509,6 @@ class _PlayerPageState extends State<PlayerPage>
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w600,
                           fontSize: titleFontSize,
-                          shadows: _contrastShadows(
-                            theme,
-                            enabled: shadowEnabled,
-                          ),
                         ),
                       ),
                     ),
@@ -581,10 +526,6 @@ class _PlayerPageState extends State<PlayerPage>
                               ? cs.error
                               : cs.onSurfaceVariant,
                           fontSize: artistFontSize,
-                          shadows: _contrastShadows(
-                            theme,
-                            enabled: shadowEnabled,
-                          ),
                         ),
                       ),
                     ),
@@ -754,16 +695,12 @@ class _PlayerPageState extends State<PlayerPage>
               padding: EdgeInsets.zero,
               visualDensity: VisualDensity.compact,
               splashRadius: 26,
-              icon: _shadowedIcon(
+              icon: Icon(
                 player.playing
                     ? Icons.pause_circle_filled_rounded
                     : Icons.play_circle_filled_rounded,
                 size: 52,
                 color: cs.primary,
-                shadows: _contrastShadows(
-                  Theme.of(context),
-                  enabled: context.watch<SettingsProvider>().contrastShadow,
-                ),
               ),
               onPressed: player.toggle,
             ),
@@ -809,9 +746,6 @@ class _PlayerPageState extends State<PlayerPage>
   ///
   /// 状态差异靠 [color] 表达（无背景，主题色=开启），循环单曲/列表再用图标区分：
   /// 随机：开启=主题色、关闭=灰；单曲循环=repeat_one+主题色、列表循环=repeat。
-  ///
-  /// 图标套一层与主题文字方向相反的柔和对比投影，保证流体背景深浅混杂区域上
-  /// 控件可辨（无额外衬底/圆盘）。
   Widget _compactButton({
     required IconData icon,
     required double iconSize,
@@ -819,21 +753,14 @@ class _PlayerPageState extends State<PlayerPage>
     required VoidCallback onPressed,
     Color? color,
   }) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final shadowEnabled = context.watch<SettingsProvider>().contrastShadow;
+    final cs = Theme.of(context).colorScheme;
     return IconButton(
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
       splashRadius: iconSize / 2,
       constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
       onPressed: enabled ? onPressed : null,
-      icon: _shadowedIcon(
-        icon,
-        size: iconSize,
-        color: color ?? cs.onSurfaceVariant,
-        shadows: _contrastShadows(theme, enabled: shadowEnabled),
-      ),
+      icon: Icon(icon, size: iconSize, color: color ?? cs.onSurfaceVariant),
     );
   }
 
@@ -897,10 +824,6 @@ class _PlayerPageState extends State<PlayerPage>
           context,
         ).textTheme.labelMedium?.copyWith(
           color: cs.onSurfaceVariant,
-          shadows: _contrastShadows(
-            Theme.of(context),
-            enabled: context.watch<SettingsProvider>().contrastShadow,
-          ),
         ),
       ),
     );
@@ -994,7 +917,6 @@ class _LyricPanelState extends State<_LyricPanel> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final shadowEnabled = context.watch<SettingsProvider>().contrastShadow;
     return SizedBox(
       height: widget.height,
       width: double.infinity,
@@ -1017,10 +939,6 @@ class _LyricPanelState extends State<_LyricPanel> {
                   context,
                 ).textTheme.bodyMedium?.copyWith(
                   color: cs.onSurfaceVariant,
-                  shadows: _contrastShadows(
-                    Theme.of(context),
-                    enabled: shadowEnabled,
-                  ),
                 ),
               ),
             )
@@ -1034,10 +952,6 @@ class _LyricPanelState extends State<_LyricPanel> {
                   currentTimeMs: pos,
                   activeColor: cs.primary,
                   inactiveColor: cs.onSurfaceVariant,
-                  shadows: _contrastShadows(
-                    Theme.of(context),
-                    enabled: settings.contrastShadow,
-                  ),
                   fontSize: widget.fontSize,
                   lineLyricRevealMode: settings.lineLyricRevealMode,
                   lyricDepthBlur: settings.lyricDepthBlur,
@@ -1152,7 +1066,6 @@ class _NowPlayingProgressState extends State<_NowPlayingProgress>
     _syncWave();
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final shadowEnabled = context.watch<SettingsProvider>().contrastShadow;
     final durMs = _durMs;
     final liveMs = _liveMs;
     // _drag 已是 0..1 归一化比例；liveMs 是毫秒需除以 durMs。
@@ -1222,9 +1135,7 @@ class _NowPlayingProgressState extends State<_NowPlayingProgress>
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    shadows: _contrastShadows(theme, enabled: shadowEnabled),
-                  ),
+                  style: Theme.of(context).textTheme.labelSmall,
                 ),
               ),
               Flexible(
@@ -1236,7 +1147,6 @@ class _NowPlayingProgressState extends State<_NowPlayingProgress>
                     context,
                   ).textTheme.labelSmall?.copyWith(
                     color: cs.onSurfaceVariant,
-                    shadows: _contrastShadows(theme, enabled: shadowEnabled),
                   ),
                 ),
               ),
