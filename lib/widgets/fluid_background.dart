@@ -296,9 +296,7 @@ class _FluidBackgroundState extends State<FluidBackground>
       if (_palette == null) return;
       setState(() {
         _palette = null;
-        _transitionStart = _displayPalette.value;
-        _transitionEnd = _fallbackPalette;
-        _paletteTransitionBlend = 0;
+        _applyPaletteTransition(_fallbackPalette);
       });
       return;
     }
@@ -312,12 +310,24 @@ class _FluidBackgroundState extends State<FluidBackground>
         : colors.map(ReadableAccentResolver.darkenForBackground).toList();
     setState(() {
       _palette = palette;
-      // 从当前显示色板渐入新色板（无过渡时 blend 已 =1，直接显示目标）。
-      _transitionStart = _displayPalette.value;
-      _transitionEnd =
-          (palette.isNotEmpty) ? palette : _fallbackPalette;
-      _paletteTransitionBlend = 0;
+      _applyPaletteTransition(
+        palette.isNotEmpty ? palette : _fallbackPalette,
+      );
     });
+  }
+
+  /// 设置色板过渡（从当前显示色板渐入 [target]）。
+  /// 若动画不可用（背景已启用但处于后台/TickerMode 关闭），过渡无法由
+  /// ticker 推进，直接落到目标色板并发布 accent，避免强调色依赖动画而滞后。
+  void _applyPaletteTransition(List<Color> target) {
+    _transitionStart = _displayPalette.value;
+    _transitionEnd = target;
+    _paletteTransitionBlend = 0;
+    if (_program != null && !_shouldAnimate) {
+      _paletteTransitionBlend = 1;
+      _displayPalette.value = List.of(target);
+      _publishAccent(target);
+    }
   }
 
   /// 按索引逐色插值两个色板；长度不同时缺失槽位取对端该槽（平滑收尾）。
