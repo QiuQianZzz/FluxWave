@@ -46,10 +46,10 @@ jobs:
           "clean_version=$cleanVersion" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
 
       - name: Sync pubspec version
-        shell: powershell
+        shell: pwsh
         run: |
-          (Get-Content pubspec.yaml) -replace '^version: \K[^+]+', '${{ steps.tag.outputs.version }}' |
-            Set-Content pubspec.yaml
+          (Get-Content pubspec.yaml) -replace '^version: ([^+]+)', 'version: ${{ steps.tag.outputs.version }}' |
+            Set-Content pubspec.yaml -Encoding utf8
 
       - name: Build Windows Release
         run: flutter build windows --release
