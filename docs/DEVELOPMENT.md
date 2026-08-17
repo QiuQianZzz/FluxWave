@@ -21,16 +21,20 @@ lib/
 ├── core/
 │   ├── audio_cache/    # 音频缓存代理（本地 HTTP 代理 + SQLite 索引）
 │   ├── audio_service/  # 系统媒体会话（通知栏控制、MediaSession）
+│   ├── localizations/  # 本地化
 │   ├── logging/        # 日志系统（运行日志 + 崩溃日志）
 │   ├── lyric/          # 歌词解析（LRC/YRC/NRC 模型 + 解析器）
-│   ├── netease/        # 在线音乐 API 适配层（加解密、会话管理）
 │   ├── navigation/     # 路由导航（预测性返回手势支持）
+│   ├── netease/        # 在线音乐 API 适配层（加解密、会话管理）
+│   ├── permissions/    # 权限申请
 │   ├── playback_stats/ # 播放统计 + 最近播放 + 本地收藏存储
-│   └── player/         # 播放 URL 解析（音质选择、试听判断）
+│   ├── player/         # 播放 URL 解析（音质选择、试听判断）
+│   └── color_readability.dart # 封面强调色可读性修正 + 背景压暗
 ├── models/             # 数据模型（Song、Playlist 等）
 ├── pages/              # 页面（首页、播放页、搜索、我的、设置等）
 ├── providers/          # 状态管理（PlayerProvider、NeteaseProvider 等）
-├── widgets/            # 通用组件（歌词视图、迷你播放栏、队列面板等）
+├── widgets/            # 通用组件（歌词视图、迷你播放栏、流体背景等）
+├── shaders/            # GLSL 着色器（fluid.frag 流体背景）
 └── main.dart           # 应用入口
 ```
 
@@ -41,6 +45,14 @@ lib/
 - `PlayerProvider`：播放状态中枢，管理队列、循环/随机模式、进度持久化
 - `AppAudioHandler`：audio_service 回调入口，处理系统媒体按钮事件
 - `MediaSessionManager`：媒体会话管理，单例模式
+
+### 流体背景与强调色（播放页视觉）
+
+- `FluidBackground`：封面取色 → 色板过渡 → GLSL shader 渲染，全链路受帧率档位节流（省电/均衡/流畅），低功耗设备可降帧
+- 封面色板：`CoverColorExtractor` 提取主色 → `darkenForBackground` 压暗过亮封面（白/浅色封面压到明度 0.22-0.33、饱和 ≤0.35），深色封面原样通过，保证白字可读
+- 强调色发布：`FluidBackground.accentColor` 静态通知器发布可读强调色（`ReadableAccentResolver`），播放页 `ValueListenableBuilder` 监听并覆盖主题 primary，色板过渡完成即发布，不依赖动画推进
+- 节奏律动：BPM 硬编码 120，`_onPosition` 写入脉冲目标、节流帧内指数平滑推进，shader 内做中心缩放 + 亮度脉冲
+- 性能要点：动画重启首帧 delta 修复、跳节流帧不更新 `_lastTickUs`（保证每间隔恰好执行一次）、过渡用真实 elapsed 累计（跳帧不拉长过渡）
 
 ### 缓存系统
 
@@ -73,7 +85,7 @@ flutter test test/lyric_parser_test.dart
 flutter analyze
 ```
 
-测试覆盖：362 个测试用例，涵盖存储层、Provider 状态管理、页面渲染、布局溢出回归、预测性返回手势等。
+测试覆盖：414 个测试用例，涵盖存储层、Provider 状态管理、页面渲染、布局溢出回归、预测性返回手势、色彩可读性等。
 
 ## 构建
 
