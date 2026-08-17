@@ -84,9 +84,10 @@ class _FluidBackgroundState extends State<FluidBackground>
   /// BPM 估算（无音频数据，取流行乐常见节奏）。
   static const double _bpm = 120;
 
-  /// 律动强度低通滤波系数（攻/释不对称）。
-  static const double _pulseAttack = 0.35;
-  static const double _pulseDecay = 0.06;
+  /// 律动强度低通滤波系数（攻/释不对称）：攻快释快，
+  /// 让脉冲在拍头猛冲后快速回落，形成一记一记的鼓点而非持续加速感。
+  static const double _pulseAttack = 0.6;
+  static const double _pulseDecay = 0.25;
 
   @override
   void initState() {

@@ -104,14 +104,17 @@ void main() {
     float t = uTime * uParams[0];
 
     // Beat-reactive pulse (0..1): deforms harder on each beat when enabled.
-    // pulse 自身已是每拍攻快释慢的平滑曲线，无需叠加高频振荡。
+    // pulse 自身已是每拍攻快释快的"鼓点"曲线（拍头猛冲后快速回落）。
     float pulse = uParams[9];
     float warpBoost = 1.0 + pulse * 0.8;
     float deformBoost = 1.0 + pulse * 0.6;
 
     // Aspect-correct coordinates so blobs stay round.
     float aspect = uResolution.x / uResolution.y;
-    vec2 p = vec2(uv.x * aspect, uv.y) * uParams[1];
+    // Beat pulse: 拍头瞬间画面以屏幕中心微微外扩，强化打击感。
+    float pulseScale = 1.0 + pulse * 0.05;
+    vec2 uvPulsed = (uv - vec2(0.5)) * pulseScale + vec2(0.5);
+    vec2 p = vec2(uvPulsed.x * aspect, uvPulsed.y) * uParams[1];
 
     // Terrain deformation: noise field evolves over time.
     float deformT = t * uParams[4];
