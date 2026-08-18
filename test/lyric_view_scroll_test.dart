@@ -60,16 +60,37 @@ Widget wrapWithLyricBlur(
   ),
 );
 
-ScrollPosition lyricPosition(WidgetTester tester) => tester
-    .state<ScrollableState>(
-      find.descendant(
-        of: find.byType(LyricView),
-        matching: find.byType(Scrollable),
-      ),
-    )
-    .position;
+/// 激活行的 LyricLineVisual（外层包装）。
+LyricLineVisual activeVisual(WidgetTester tester) => tester.widget<
+  LyricLineVisual
+>(
+  find.ancestor(
+    of: find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
+    matching: find.byType(LyricLineVisual),
+  ),
+);
 
-/// 当前行（isActive）顶边相对歌词可视区顶边的距离（px）。
+/// 第 [index] 行的 LyricLineVisual。
+LyricLineVisual visualOf(WidgetTester tester, int index) => tester.widget<
+  LyricLineVisual
+>(
+  find.ancestor(
+    of: find.byWidgetPredicate(
+      (w) => w is LyricLineView && w.line.text == 'line $index',
+    ),
+    matching: find.byType(LyricLineVisual),
+  ),
+);
+
+/// 激活行的行文本（判断高亮/跟随是否切换到了目标句）。
+String activeLineText(WidgetTester tester) {
+  final view = tester.widget<LyricLineView>(
+    find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
+  );
+  return view.line.text;
+}
+
+/// 激活行顶边相对歌词可视区顶边的距离（px）。包含 transform 位移。
 double activeLineTopInViewport(WidgetTester tester) {
   final activeLine = find.byWidgetPredicate(
     (w) => w is LyricLineView && w.isActive,
@@ -82,7 +103,8 @@ double activeLineTopInViewport(WidgetTester tester) {
 
 void main() {
   testWidgets('手指按住滚动期间切句：不回退（修"手指"没松也滚回来）', (tester) async {
-    await tester.pumpWidget(wrap(buildLines(), 0));
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -92,45 +114,63 @@ void main() {
     );
     await gesture.moveBy(const Offset(0, -250));
     await tester.pump();
-    final scrolled = lyricPosition(tester).pixels;
-    expect(scrolled, greaterThan(0));
+    final scrolled = activeVisual(tester).translateY;
+    expect(scrolled, isNot(0), reason: '拖动后激活行应偏离锚点');
 
     // 播放推进到第 6 行（当前播放行变化）——手指仍按着，不得滚动回正。
-    await tester.pumpWidget(wrap(buildLines(), 6 * 2000));
+    await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pump();
-    expect(lyricPosition(tester).pixels, scrolled);
+    expect(activeLineText(tester), 'line 6', reason: '高亮跟随播放推进');
+    expect(
+      visualOf(tester, 0).translateY,
+      closeTo(scrolled, 0.001),
+      reason: '手指按着时列表不得回正',
+    );
     await gesture.up();
+    await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
   });
 
   testWidgets('无手动介入：切句正常跟随', (tester) async {
-    await tester.pumpWidget(wrap(buildLines(), 0));
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
     await tester.pump();
     await tester.pumpAndSettle();
-    final initial = lyricPosition(tester).pixels;
+    final initial = activeVisual(tester).translateY;
 
-    // 没有任何手动交互，播放直接推进到第 6 行 → 跟随滚动。
-    await tester.pumpWidget(wrap(buildLines(), 6 * 2000));
+    // 没有任何手动交互，播放直接推进到第 6 行 → 高亮跟随到第 6 行并回锚点。
+    await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pumpAndSettle();
-    expect(lyricPosition(tester).pixels, isNot(equals(initial)));
+    expect(activeLineText(tester), 'line 6', reason: '高亮应切到第 6 行');
+    expect(activeVisual(tester).translateY, closeTo(initial, 0.001), reason: '锚点行顶边不变');
+    expect(visualOf(tester, 0).translateY, lessThan(0), reason: '第 0 行应被顶出可视区上方');
   });
 
   testWidgets('鼠标滚轮：离开歌词区即时解除抑制（无需等 3 秒）', (tester) async {
-    await tester.pumpWidget(wrap(buildLines(), 0));
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
     await tester.pump();
     await tester.pumpAndSettle();
 
-    // 用 jumpTo 模拟滚轮把歌词滚离播放行 → 进入抑制窗口（定时器非空）。
-    lyricPosition(tester).jumpTo(180);
-    await tester.pump();
-
-    // 鼠标离开歌词区：触发 MouseRegion.onExit，抑制窗口应立即清除。
-    final mouseRegion = tester.widget<MouseRegion>(
-      find.descendant(
-        of: find.byType(LyricView),
-        matching: find.byType(MouseRegion),
+    // 滚轮把歌词滚离播放行 → 进入抑制窗口（定时器非空）。
+    final beforeScroll = activeVisual(tester).translateY;
+    await tester.sendEventToBinding(
+      PointerScrollEvent(
+        position: tester.getCenter(find.byType(LyricView)),
+        scrollDelta: const Offset(0, -120),
+        kind: PointerDeviceKind.mouse,
       ),
     );
+    await tester.pump();
+    final scrolled = activeVisual(tester).translateY;
+    expect(scrolled, isNot(equals(beforeScroll)), reason: '滚轮应产生滚动');
+
+    // 鼠标离开歌词区：触发 MouseRegion.onExit，抑制窗口应立即清除。
+    final mouseRegions = find.descendant(
+      of: find.byType(LyricView),
+      matching: find.byType(MouseRegion),
+    );
+    final mouseRegion = tester.widget<MouseRegion>(mouseRegions.first);
     mouseRegion.onExit!(
       PointerExitEvent(
         device: 1,
@@ -140,42 +180,80 @@ void main() {
     );
     await tester.pump();
 
-    // 切句 → 应恢复跟随（若 onExit 未清除抑制，位置将保持 180）。
-    await tester.pumpWidget(wrap(buildLines(), 6 * 2000));
+    // 切句 → 应恢复跟随（若 onExit 未清除抑制，位置将保持滚轮后的值）。
+    await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pumpAndSettle();
-    expect(lyricPosition(tester).pixels, isNot(equals(180)));
+    expect(activeLineText(tester), 'line 6');
+    expect(activeVisual(tester).translateY, isNot(equals(scrolled)));
   });
 
-  testWidgets('Android 慢拖松手（无惯性）：抬手即进 3 秒窗口，切句不回正，窗口过后恢复', (tester) async {
-    await tester.pumpWidget(wrap(buildLines(), 0));
+  testWidgets('鼠标滚轮连续滚动：每次滚轮都应累加偏移（修只滚一次的回归）', (tester) async {
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
     await tester.pump();
     await tester.pumpAndSettle();
 
-    // 慢速拖动后直接抬手（up() 不带速度 → 无惯性 fling，ScrollPosition 不再
-    // 发通知）。这正是"回弹必现"的复现路径：旧实现抬手后没有事件开窗口。
+    Future<void> wheel(double dy) async {
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: tester.getCenter(find.byType(LyricView)),
+          scrollDelta: Offset(0, dy),
+          kind: PointerDeviceKind.mouse,
+        ),
+      );
+      await tester.pump();
+    }
+
+    await wheel(120);
+    final first = activeVisual(tester).translateY;
+    await wheel(120);
+    final second = activeVisual(tester).translateY;
+    expect(second, isNot(equals(first)), reason: '第二次滚轮必须继续滚动（回归：只滚一次）');
+    await wheel(120);
+    final third = activeVisual(tester).translateY;
+    expect(third, isNot(equals(second)), reason: '第三次滚轮仍应继续滚动');
+    expect(
+      (third - first).abs(),
+      greaterThan((second - first).abs()),
+      reason: '连续滚动应累加偏移，而非覆盖',
+    );
+  });
+
+  testWidgets('Android 慢拖松手（无惯性）：抬手即进 3 秒窗口，切句不回正，窗口过后恢复', (tester) async {
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(LyricView)),
     );
     await gesture.moveBy(const Offset(0, -250));
     await tester.pump();
-    final scrolled = lyricPosition(tester).pixels;
+    final scrolled = activeVisual(tester).translateY;
     await gesture.up();
     await tester.pump();
 
     // 松手后窗口仍有效：切句不得回正。
-    await tester.pumpWidget(wrap(buildLines(), 6 * 2000));
+    await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pump();
-    expect(lyricPosition(tester).pixels, scrolled);
+    expect(
+      visualOf(tester, 0).translateY,
+      closeTo(scrolled, 0.001),
+      reason: '3 秒窗口内列表位置不回正',
+    );
 
     // 超过 3 秒窗口后再切句 → 恢复跟随。
     await tester.pump(const Duration(seconds: 4));
-    await tester.pumpWidget(wrap(buildLines(), 8 * 2000));
+    await tester.pumpWidget(wrap(lines, 8 * 2000));
     await tester.pumpAndSettle();
-    expect(lyricPosition(tester).pixels, isNot(equals(scrolled)));
+    expect(activeLineText(tester), 'line 8');
+    expect(activeVisual(tester).translateY, isNot(equals(scrolled)));
   });
 
   testWidgets('拖动 + 第二根手指轻轻点按离开：拖根抬手的窗口仍生效', (tester) async {
-    await tester.pumpWidget(wrap(buildLines(), 0));
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -186,7 +264,7 @@ void main() {
     );
     await a.moveBy(const Offset(0, -250));
     await tester.pump();
-    final scrolled = lyricPosition(tester).pixels;
+    final scrolled = activeVisual(tester).translateY;
 
     // 手指 B 在不拖动的情况下按一下就走——不得抹掉 A 的拖拽标记。
     final b = await tester.startGesture(Offset.zero, pointer: 11);
@@ -197,15 +275,19 @@ void main() {
     await tester.pump();
 
     // 窗口仍应有效：切句不回正。
-    await tester.pumpWidget(wrap(buildLines(), 6 * 2000));
+    await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pump();
-    expect(lyricPosition(tester).pixels, scrolled);
+    expect(
+      visualOf(tester, 0).translateY,
+      closeTo(scrolled, 0.001),
+      reason: '第二根手指不抹掉拖拽窗口，切句列表不回正',
+    );
 
     // 窗口过后：恢复跟随。
     await tester.pump(const Duration(seconds: 4));
-    await tester.pumpWidget(wrap(buildLines(), 8 * 2000));
+    await tester.pumpWidget(wrap(lines, 8 * 2000));
     await tester.pumpAndSettle();
-    expect(lyricPosition(tester).pixels, isNot(equals(scrolled)));
+    expect(activeVisual(tester).translateY, isNot(equals(scrolled)));
   });
 
   testWidgets('惯性/手动滚动抑制期间点击行：立即 seek 并定位，不被 3 秒窗口压住', (tester) async {
@@ -230,10 +312,15 @@ void main() {
     );
     await tester.pump();
     await tester.pumpAndSettle();
-    final before = lyricPosition(tester).pixels;
+    final before = activeVisual(tester).translateY;
 
     // 手动滚动到别处 → 打开 3 秒抑制窗口（模拟惯性滑动的尾部状态）。
-    lyricPosition(tester).jumpTo(150);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(LyricView)),
+    );
+    await gesture.moveBy(const Offset(0, 250));
+    await tester.pump();
+    await gesture.up();
     await tester.pump();
 
     // 点击列表里某一行的 InkWell：应清掉窗口并 seek + 跟回目标行。
@@ -245,16 +332,17 @@ void main() {
     await tester.tap(inkWells.at(1));
     await tester.pumpAndSettle();
 
-    expect(seeked, isNotNull, reason: '点击应触发 seek');
-    final after = lyricPosition(tester).pixels;
-    expect(after, isNot(equals(before)), reason: '点击后应定位滚动到目标行');
+    expect(seeked, 2000, reason: '点击应触发第 1 行 seek');
+    expect(activeLineText(tester), 'line 1', reason: '点击后高亮应切到目标行');
+    expect(activeVisual(tester).translateY, closeTo(before, 0.001), reason: '点击后应回锚点');
   });
 
   testWidgets('只轻点（没有任何拖动痕迹）：不误开窗口，换句照常跟随', (tester) async {
-    await tester.pumpWidget(wrap(buildLines(), 0));
+    final lines = buildLines();
+    await tester.pumpWidget(wrap(lines, 0));
     await tester.pump();
     await tester.pumpAndSettle();
-    final initial = lyricPosition(tester).pixels;
+    final initial = activeVisual(tester).translateY;
 
     // 两根手指都是"按下即抬"，谁也没拖。
     final b = await tester.startGesture(Offset.zero, pointer: 20);
@@ -264,10 +352,11 @@ void main() {
     await c.up();
     await tester.pump();
 
-    // 若误开了窗口，换句会被压住（位置保持不变）；正确则应照常跟随滚动。
-    await tester.pumpWidget(wrap(buildLines(), 6 * 2000));
+    // 若误开了窗口，换句会被压住（高亮不跟随）；正确则应照常跟随。
+    await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pumpAndSettle();
-    expect(lyricPosition(tester).pixels, isNot(equals(initial)));
+    expect(activeLineText(tester), 'line 6', reason: '换句应照常跟随');
+    expect(activeVisual(tester).translateY, closeTo(initial, 0.001));
   });
 
   testWidgets('lineLyricRevealMode 参数传入后 painter 同步接收（静态/扫过）', (tester) async {
@@ -344,7 +433,7 @@ void main() {
     expect(top, greaterThan(0), reason: '当前行不应被顶出可视区顶部');
   });
 
-  testWidgets('景深模糊梯度：当前行不模糊，越靠近可视区边缘越模糊', (tester) async {
+  testWidgets('景深模糊梯度：当前行不模糊，相邻行即有可见模糊且随距离递增', (tester) async {
     final lines = buildLines();
     await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
     await tester.pump();
@@ -356,19 +445,35 @@ void main() {
     double blurOf(int index) => visuals[index].blurSigma;
 
     expect(blurOf(3), 0, reason: '当前行不模糊');
-    // 下方按曲线递增：靠近当前行几乎清晰，越往可视区底部越模糊。
+    // 下方按指数曲线递增：相邻行已有明显模糊，越远越糊。
+    expect(blurOf(4), greaterThan(0.8), reason: '当前行下一句应有可见模糊');
     expect(blurOf(4), lessThan(blurOf(6)), reason: '下方模糊应随距离递增');
     expect(blurOf(6), lessThan(blurOf(8)), reason: '下方模糊应随距离递增');
     expect(
       blurOf(8),
       lessThan(blurOf(visuals.length - 1)),
-      reason: '接近可视区底部最模糊',
+      reason: '远处行最模糊',
     );
     // 上方同样递增，且已播区顶部更模糊。
-    expect(blurOf(2), greaterThan(0), reason: '当前行上方有轻微模糊');
-    expect(blurOf(0), greaterThan(blurOf(2)), reason: '越往可视区顶部越模糊');
-    // 靠近当前行的行仍清晰可读（模糊度很小）。
-    expect(blurOf(4), lessThan(0.5), reason: '当前行下一句应基本清晰');
+    expect(blurOf(2), greaterThan(0.8), reason: '当前行上一句也应有可见模糊');
+    expect(blurOf(0), greaterThan(blurOf(2)), reason: '越往视口顶部越模糊');
+  });
+
+  testWidgets('景深淡出：越远行越透明（视口外溶解），当前行不透明', (tester) async {
+    final lines = buildLines();
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final visuals = tester
+        .widgetList<LyricLineVisual>(find.byType(LyricLineVisual))
+        .toList();
+    double alphaOf(int index) => visuals[index].alpha;
+
+    expect(alphaOf(3), closeTo(1.0, 1e-9), reason: '当前行不淡出');
+    expect(alphaOf(4), closeTo(0.35, 1e-9), reason: '近处行保持引擎透明度');
+    expect(alphaOf(19), lessThan(alphaOf(4)), reason: '远处行因景深淡出更透明');
+    expect(alphaOf(19), lessThan(0.2), reason: '视口外行应接近溶解');
   });
 
   testWidgets('关闭景深模糊开关：所有行 blurSigma 为 0', (tester) async {
@@ -407,6 +512,45 @@ void main() {
       find.byType(LyricLineVisual),
     )) {
       expect(w.blurSigma, 0, reason: '拖动期间全部清晰');
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('拖动滚出视口顶的行淡出到全透明（回归：不会画到封面/标题区）', (tester) async {
+    final lines = buildLines();
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 向上拖：歌词整体上移，部分行滚出视口顶。
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(LyricView)),
+    );
+    await gesture.moveBy(const Offset(0, -250));
+    await tester.pump();
+
+    final visuals = tester
+        .widgetList<LyricLineVisual>(find.byType(LyricLineVisual))
+        .toList();
+    var hasOutOfTop = false;
+    for (final w in visuals) {
+      if (w.translateY < -48) {
+        hasOutOfTop = true;
+        expect(w.alpha, 0, reason: '滚出视口顶的行必须完全透明（不画到封面/标题区）');
+      }
+    }
+    expect(hasOutOfTop, isTrue, reason: '拖动应让部分行滚出视口顶');
+
+    // 视口内（非边缘）的行保持引擎透明度，不被景深索引淡出压低。
+    for (final w in visuals) {
+      if (w.translateY >= 60 && w.translateY <= 540) {
+        expect(
+          w.alpha,
+          anyOf(closeTo(1.0, 1e-9), closeTo(0.35, 1e-9)),
+          reason: '视口内行保持引擎透明度',
+        );
+      }
     }
     await gesture.up();
     await tester.pumpAndSettle();

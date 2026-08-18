@@ -132,62 +132,47 @@ class LyricLineView extends StatelessWidget {
   }
 }
 
-/// 单行视觉动画包装：聚焦行放大提亮、非聚焦行缩小压暗 + 按传入模糊值。
+/// 单行视觉呈现：由 [LyricEngine] 每帧喂入的位置/缩放/透明度/模糊值，
+/// 本组件只做组合，不含任何动画逻辑。
 ///
-/// - 聚焦：scale 1.015 / alpha 1.0，600ms LinearOutSlowIn
-/// - 非聚焦：scale 0.965 / alpha 0.28，300ms EaseInOut
-/// - 模糊半径 = [blurSigma]（由 LyricView 按"距当前行的归一化距离"曲线计算，
-///   滑动/自动滚动期间置 0；此处仅做 300ms 平滑过渡）
+/// - [translateY]：本行顶边相对歌词可视区顶边的 Y 偏移（px，可负/超视口）。
+/// - [scale]：聚焦行 1.0，非聚焦 0.97（引擎内的弹簧在驱动）。
+/// - [alpha]：0..1。
+/// - [blurSigma]：景深模糊半径（由 LyricView 按"距当前行的归一化距离"计算）。
 class LyricLineVisual extends StatelessWidget {
-  final bool isFocused;
   final Widget child;
-
-  /// 高斯模糊半径（sigma）；0 = 不模糊。由外层按景深模型计算。
+  final double translateY;
+  final double scale;
+  final double alpha;
   final double blurSigma;
 
   const LyricLineVisual({
     super.key,
-    required this.isFocused,
     required this.child,
+    this.translateY = 0,
+    this.scale = 1,
+    this.alpha = 1,
     this.blurSigma = 0,
   });
 
   @override
   Widget build(BuildContext context) {
-    final target = isFocused ? 1.0 : 0.0;
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: target, end: target),
-      duration: isFocused
-          ? const Duration(milliseconds: 600)
-          : const Duration(milliseconds: 300),
-      curve: isFocused ? Curves.linearToEaseOut : Curves.easeInOut,
-      builder: (context, t, child) {
-        final scale = lerpDouble(0.965, 1.015, t)!;
-        final alpha = lerpDouble(0.28, 1.0, t)!;
-        final blurTarget = isFocused ? 0.0 : blurSigma;
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: blurTarget, end: blurTarget),
-          duration: const Duration(milliseconds: 300),
-          builder: (context, sigma, child) {
-            Widget result = Transform.scale(
-              scale: scale,
-              // TransformOrigin(0, 1)（LTR 左下角）：
-              // 放大时左边缘保持不动，避免聚焦行左溢出可视区。
-              alignment: Alignment.bottomLeft,
-              child: Opacity(opacity: alpha, child: child),
-            );
-            if (sigma > 0.05) {
-              result = ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-                child: result,
-              );
-            }
-            return result;
-          },
-          child: child,
-        );
-      },
-      child: child,
+    final visual = Transform.translate(
+      offset: Offset(0, translateY),
+      child: Transform.scale(
+        scale: scale,
+        // TransformOrigin(0, 1)（LTR 左下角）：放大时左边缘保持不动，
+        // 避免聚焦行左溢出可视区。
+        alignment: Alignment.bottomLeft,
+        child: Opacity(opacity: alpha.clamp(0.0, 1.0), child: child),
+      ),
     );
+    if (blurSigma > 0.05) {
+      return ImageFiltered(
+        imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+        child: visual,
+      );
+    }
+    return visual;
   }
 }

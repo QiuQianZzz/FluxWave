@@ -955,6 +955,8 @@ class _LyricPanelState extends State<_LyricPanel> {
                   fontSize: widget.fontSize,
                   lineLyricRevealMode: settings.lineLyricRevealMode,
                   lyricDepthBlur: settings.lyricDepthBlur,
+                  lyricSpringEnabled: settings.lyricSpringEnabled,
+                  lyricSpringPreset: settings.lyricSpringPreset,
                   onSeekLine: (startMs) {
                     context.read<PlayerProvider>().seek(
                       Duration(milliseconds: startMs),

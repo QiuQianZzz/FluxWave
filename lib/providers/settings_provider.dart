@@ -5,6 +5,7 @@ import '../core/app_icon.dart';
 import '../core/audio_cache/cache_store.dart';
 import '../core/logging/app_log.dart';
 import '../core/lyric/line_lyric_reveal_mode.dart';
+import '../core/lyric/lyric_spring.dart';
 import '../core/netease/netease_config.dart';
 import '../core/platform_utils.dart';
 
@@ -37,6 +38,8 @@ class SettingsProvider extends ChangeNotifier {
   static const _kCacheMaxMB = 'audio_cache_max_mb';
   static const _kLineLyricRevealMode = 'line_lyric_reveal_mode';
   static const _kLyricDepthBlur = 'lyric_depth_blur';
+  static const _kLyricSpringEnabled = 'lyric_spring_enabled';
+  static const _kLyricSpringPreset = 'lyric_spring_preset';
   static const _kGlassBlur = 'glass_blur';
   static const _kCheckUpdateOnStart = 'check_update_on_start';
   static const _kUpdateChannel = 'update_channel';
@@ -96,6 +99,12 @@ class SettingsProvider extends ChangeNotifier {
   /// 歌词景深模糊开关。默认开（部分人不喜欢该效果，可在设置页关闭）。
   bool _lyricDepthBlur = true;
 
+  /// 歌词弹簧动画开关。默认开（Apple Music 风格行切换 + 聚焦过冲）。
+  bool _lyricSpringEnabled = true;
+
+  /// 歌词弹簧强度档位。默认标准（轻微过冲）。
+  LyricSpringPreset _lyricSpringPreset = LyricSpringPreset.standard;
+
   /// 全局界面毛玻璃开关（导航栏 / 侧边栏 / 迷你播放器等）。默认开。
   bool _glassBlur = true;
 
@@ -149,6 +158,12 @@ class SettingsProvider extends ChangeNotifier {
   /// 歌词景深模糊开关：开启时按"距当前行的归一化距离"曲线计算模糊，靠近
   /// 当前行几乎清晰、往可视区顶部/底部边缘渐强；滑动/自动滚动期间自动解除。
   bool get lyricDepthBlur => _lyricDepthBlur;
+
+  /// 歌词弹簧动画开关：行切换滚动 + 聚焦行缩放使用弹簧曲线（轻微过冲）。
+  bool get lyricSpringEnabled => _lyricSpringEnabled;
+
+  /// 歌词弹簧强度档位。
+  LyricSpringPreset get lyricSpringPreset => _lyricSpringPreset;
 
   /// 全局界面毛玻璃开关（导航栏 / 侧边栏 / 迷你播放器等）。
   bool get glassBlur => _glassBlur;
@@ -205,6 +220,11 @@ class SettingsProvider extends ChangeNotifier {
         prefs.getString(_kLineLyricRevealMode),
       );
       _lyricDepthBlur = prefs.getBool(_kLyricDepthBlur) ?? true;
+      _lyricSpringEnabled = prefs.getBool(_kLyricSpringEnabled) ?? true;
+      _lyricSpringPreset = LyricSpringPreset.values.firstWhere(
+        (e) => e.name == prefs.getString(_kLyricSpringPreset),
+        orElse: () => LyricSpringPreset.standard,
+      );
       _glassBlur = prefs.getBool(_kGlassBlur) ?? true;
       _checkUpdateOnStart = prefs.getBool(_kCheckUpdateOnStart) ?? true;
       _updateChannel = prefs.getString(_kUpdateChannel) ?? 'beta';
@@ -316,6 +336,24 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kLyricDepthBlur, v);
+  }
+
+  /// 切换歌词弹簧动画开关（持久化）。立即作用于歌词页。
+  Future<void> setLyricSpringEnabled(bool v) async {
+    if (v == _lyricSpringEnabled) return;
+    _lyricSpringEnabled = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLyricSpringEnabled, v);
+  }
+
+  /// 切换歌词弹簧强度档位（持久化）。立即作用于歌词页。
+  Future<void> setLyricSpringPreset(LyricSpringPreset v) async {
+    if (v == _lyricSpringPreset) return;
+    _lyricSpringPreset = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLyricSpringPreset, v.name);
   }
 
   /// 切换全局界面毛玻璃开关（持久化）。立即作用于导航栏 / 侧边栏 / 迷你播放器等。

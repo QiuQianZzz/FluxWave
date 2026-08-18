@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/lyric/line_lyric_reveal_mode.dart';
+import '../../../core/lyric/lyric_spring.dart';
 import '../../../core/permissions/notification_permission.dart';
 import '../../../core/platform_utils.dart';
 import '../../../providers/player_provider.dart';
@@ -160,6 +161,86 @@ class PlaySection extends StatelessWidget {
               value: settings.lyricDepthBlur,
               onChanged: (v) => settings.setLyricDepthBlur(v),
             ),
+            const Divider(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('歌词弹簧动画'),
+              subtitle: Text(
+                '行切换滚动与当前行缩放带轻微回弹（Apple Music 风格）。'
+                '关闭后使用固定时长缓动。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              value: settings.lyricSpringEnabled,
+              onChanged: (v) => settings.setLyricSpringEnabled(v),
+            ),
+            if (settings.lyricSpringEnabled)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final narrow = constraints.maxWidth < 440;
+                    final button = SegmentedButton<LyricSpringPreset>(
+                      segments: [
+                        for (final preset in LyricSpringPreset.values)
+                          ButtonSegment(
+                            value: preset,
+                            label: Text(preset.label),
+                          ),
+                      ],
+                      selected: {settings.lyricSpringPreset},
+                      onSelectionChanged: (s) =>
+                          settings.setLyricSpringPreset(s.first),
+                      showSelectedIcon: false,
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity(
+                          horizontal: -1,
+                          vertical: -1,
+                        ),
+                      ),
+                    );
+                    final label = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('回弹强度', style: theme.textTheme.bodyMedium),
+                        const SizedBox(height: 2),
+                        Text(
+                          '轻弹接近线性，标准轻微过冲，强弹回弹感最明显。',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    );
+                    if (narrow) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          label,
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: button,
+                          ),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(flex: 2, child: label),
+                        Expanded(
+                          flex: 3,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: button,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 8),

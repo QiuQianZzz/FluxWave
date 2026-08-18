@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fluxwave/core/lyric/line_lyric_reveal_mode.dart';
+import 'package:fluxwave/core/lyric/lyric_spring.dart';
 import 'package:fluxwave/providers/settings_provider.dart';
 
 /// SettingsProvider.launcherIconId（桌面图标切换）的持久化测试。
@@ -116,5 +117,32 @@ void main() {
 
     await s2.setFluidFrameRate(FluidFrameRate.low);
     expect(s2.fluidFrameRate, FluidFrameRate.low);
+  });
+
+  test('歌词弹簧默认开、档位默认标准；切换并持久化', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = SettingsProvider();
+    expect(s.lyricSpringEnabled, isTrue);
+    expect(s.lyricSpringPreset, LyricSpringPreset.standard);
+
+    await s.init();
+    expect(s.lyricSpringEnabled, isTrue);
+    expect(s.lyricSpringPreset, LyricSpringPreset.standard);
+
+    await s.setLyricSpringEnabled(false);
+    expect(s.lyricSpringEnabled, isFalse);
+
+    await s.setLyricSpringPreset(LyricSpringPreset.bouncy);
+    expect(s.lyricSpringPreset, LyricSpringPreset.bouncy);
+
+    final s2 = SettingsProvider();
+    await s2.init();
+    expect(s2.lyricSpringEnabled, isFalse);
+    expect(s2.lyricSpringPreset, LyricSpringPreset.bouncy);
+
+    await s2.setLyricSpringEnabled(true);
+    await s2.setLyricSpringPreset(LyricSpringPreset.soft);
+    expect(s2.lyricSpringEnabled, isTrue);
+    expect(s2.lyricSpringPreset, LyricSpringPreset.soft);
   });
 }

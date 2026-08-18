@@ -282,12 +282,14 @@ void main() {
   });
 
   group('LyricLineVisual', () {
-    testWidgets('聚焦放大提亮、非聚焦缩小压暗', (tester) async {
+    testWidgets('应用引擎喂入的位移/缩放/透明度', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: LyricLineVisual(
-              isFocused: true,
+              translateY: 12,
+              scale: 0.97,
+              alpha: 0.35,
               blurSigma: 0,
               child: const Text('x'),
             ),
@@ -295,13 +297,38 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      // 聚焦：scale 1.015
+      final visual = tester.widget<LyricLineVisual>(
+        find.byType(LyricLineVisual),
+      );
+      expect(visual.translateY, 12);
+      expect(visual.scale, closeTo(0.97, 1e-9));
+      expect(visual.alpha, closeTo(0.35, 1e-9));
+
+      // 渲染层面确实套用了位移/缩放变换。
       final transform = tester.widget<Transform>(
         find
             .ancestor(of: find.text('x'), matching: find.byType(Transform))
             .first,
       );
       expect(transform.transform, isNot(isNull));
+    });
+
+    testWidgets('blurSigma 有效时套用高斯模糊', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LyricLineVisual(
+              blurSigma: 1.2,
+              child: const Text('x'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.ancestor(of: find.text('x'), matching: find.byType(ImageFiltered)),
+        findsOneWidget,
+      );
     });
   });
 }

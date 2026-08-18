@@ -3,21 +3,27 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../core/lyric/line_lyric_reveal_mode.dart';
 import '../../core/lyric/lyric_model.dart';
 import '../../core/lyric/lyric_parser.dart';
+import '../../core/lyric/lyric_spring.dart';
 import 'breathing_dots.dart';
+import 'lyric_engine.dart';
 import 'lyric_layout.dart';
 import 'lyric_line.dart';
 
-/// 歌词列表视图。
+/// 歌词列表视图（AMLL 布局引擎版）。
 ///
-/// - `ListView.builder` + 上下 padding = maxHeight/2.5（首末行可居中）
-/// - 当前行变化时自动滚动（保留既有的手动滚动抑制状态机）
-/// - 每行 Canvas 预测量渲染：逐字 awesome 动画 / 简单浮动 + 行内渐变揭示
-/// - 非当前行缩放/压暗/模糊；前奏与长间奏显示呼吸圆点；上下边缘渐隐
-/// - 点击行 seek；长按触发 [onLyricLongPress]
+/// - 用 [LyricEngine]（对标 AMLL `calcLayout`）做"当前行驱动 + 每行独立
+///   posY/scale 弹簧 + 级联延迟 + 动态弹簧参数"，[Stack] + [Transform.translate]
+///   绝对定位渲染所有行（无 ListView/ScrollController）。
+/// - 换句时每行错峰弹向新目标 → "不同行歌词上来时的不一致错落效果"。
+/// - 交互保留：点行 seek、长按、手动拖动（跟手 + 3 秒抑制窗口 + 自动回正）、
+///   鼠标滚轮浏览、景深（模糊 + 淡出）。
+/// - 视口安全：每行按像素位置在视口顶/底边缘淡出，配合外层硬裁剪，歌词
+///   绝不会画到歌词面板之外（封面/标题区、控件区）。
 /// - [lyricOffsetMs] 歌词整体时间偏移（正 = 提前，负 = 延后）
 class LyricView extends StatefulWidget {
   final List<LyricLine> lines;
@@ -41,10 +47,16 @@ class LyricView extends StatefulWidget {
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 不受影响。
   final LineLyricRevealMode lineLyricRevealMode;
 
-  /// 是否启用歌词景深模糊：开启时按"距当前行的归一化距离"曲线计算模糊，
-  /// 靠近当前行几乎清晰、往可视区顶部/底部边缘渐强；滑动/自动滚动期间自动
-  /// 解除模糊。
+  /// 是否启用歌词景深模糊：开启时按"距当前行的行数"曲线计算模糊（与视口
+  /// 尺寸/字号无关），相邻行即有可见模糊、越远越糊；滑动/拖动期间自动解除
+  /// 模糊（仅保留视口边缘淡出）。
   final bool lyricDepthBlur;
+
+  /// 是否启用歌词弹簧动画（行切换时每行独立 posY/scale 弹簧 + 级联延迟）。
+  final bool lyricSpringEnabled;
+
+  /// 歌词弹簧强度档位（仅 [lyricSpringEnabled] 开启时生效）。
+  final LyricSpringPreset lyricSpringPreset;
 
   const LyricView({
     super.key,
@@ -57,6 +69,8 @@ class LyricView extends StatefulWidget {
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
     this.lyricDepthBlur = true,
+    this.lyricSpringEnabled = true,
+    this.lyricSpringPreset = LyricSpringPreset.standard,
     this.onSeekLine,
     this.onLyricLongPress,
   });
@@ -65,33 +79,39 @@ class LyricView extends StatefulWidget {
   State<LyricView> createState() => _LyricViewState();
 }
 
-class _LyricViewState extends State<LyricView> {
-  final _scrollController = ScrollController();
+class _LyricViewState extends State<LyricView>
+    with SingleTickerProviderStateMixin {
+  late LyricEngine _engine;
 
-  /// 当前行 GlobalKey，用于 ensureVisible 精确滚动到指定对齐位置
-  final _activeKey = GlobalKey();
   int _currentIndex = -1;
-  bool _autoScrolling = false;
 
-  /// 滚动动画期间冻结的当前时间：避免位置流持续推送导致逐字揭示进度跳变。
-  int? _frozenTimeMs;
+  // ── 帧循环 ──
+  late final Ticker _ticker;
+  Duration? _lastTickerElapsed;
 
-  /// 手指是否正按在歌词列表上（raw Listener 跟踪，不与手势竞技场冲突）。
+  /// 指针/拖动跟踪（raw Listener 观察，不与手势竞技场冲突）。
   bool _pointerDown = false;
-
-  /// 当前按下的指针（pointer → 按下位置）。用于区分"真拖动"与"惯性期间
-  /// 的轻点"：惯性时滚动在动但指针没动，不应误判为拖动而打开 3 秒窗口。
   final Map<int, Offset> _pointerDownPositions = {};
-
-  /// 本次按下是否真的拖动过（指针位移超过触摸阈值）：抬手时据它决定是否
-  /// 进入 3 秒窗口。
   bool _pointerDragged = false;
+  double _dragStartY = 0;
+  double _dragStartScrollOffset = 0;
 
-  /// 用户松手后禁止自动回正的定时器（非 null = 抑制中）。
+  /// 手动浏览抑制窗口（非 null = 抑制中，松手/滚轮后 3 秒）。
   Timer? _userScrollHoldTimer;
 
-  /// 待滚动标志：当前行变化或初始化时设为 true，build 阶段高度足够后执行。
+  /// 首帧/视口变化/换歌后需要强制落位。
   bool _needsJump = false;
+
+  double _lastViewportHeight = 0;
+
+  // ── 测量缓存 ──
+  double _measuredWidth = double.infinity;
+  int? _measuredDotsLine;
+  bool _measurementsDirty = false;
+  bool _heightsChanged = false;
+  List<LyricLineLayout?> _layouts = [];
+  List<double> _baseHeights = [];
+  List<double> _itemHeights = [];
 
   static const _kMinScrollHeight = 100.0;
   static const _kUserScrollHold = Duration(seconds: 3);
@@ -102,27 +122,23 @@ class _LyricViewState extends State<LyricView> {
   static const _kPlayedLyricViewportFraction = 0.20;
   static const _kPlayedFractionMin = 0.18;
   static const _kPlayedFractionMax = 0.35;
-  static const _kTopFadeLength = 64.0;
-  static const _kBottomFadeLength = 160.0;
-  static const _kFocusedLyricMaskSafePadding = 12.0;
+  static const _kMinPlayedSpace = 64.0;
+  static const _kAnchorSafePadding = 12.0;
   static const _kKeepAliveZone = 40.0;
   static const _kMinimumOffset = 48.0;
-  static const _kFocusedVisualCompensationRatio = 0.42;
-  static const _kLineHeightFactor = 1.18;
 
-  // ── 歌词景深模糊（柔和梯度版）──
-  // 模糊度按"距当前行的归一化距离"二次曲线计算：靠近当前行几乎清晰，
-  // 越往可视区顶部/底部边缘越模糊，边缘（最顶/最底）达 [_kBlurMaxSigma]。
-  // 滑动/拖动/自动滚动期间全部清晰，方便浏览其它歌词。
-  static const _kBlurMaxSigma = 1.8;
+  // ── 歌词景深（模糊 + 边缘淡出）──
+  // 模糊按"距当前行的行数"指数增长，与视口尺寸/字号无关（窄屏/宽屏表现
+  // 一致）：相邻行即有可见模糊，约 [_kBlurHalfRow] 行距达一半最大模糊，
+  // 远处趋近 [_kBlurMaxSigma]。视口顶/底用像素淡出（_edgeFadeOf）溶解，
+  // 配合外层硬裁剪保证不画到面板之外。
+  static const _kBlurMaxSigma = 2.4;
+  static const _kBlurHalfRow = 1.5;
 
-  /// 行排版缓存：index → 布局。lines/fontSize/测量宽度变化时失效。
-  List<LyricLineLayout?> _layoutCache = [];
-  double _measuredWidth = 0;
-
-  /// 最近一次布局视口高度：检测歌词面板高度变化（如切歌词页的过渡动画、
-  /// 重新进入歌词页）并重新定位当前行，避免在过渡中途的小视口定位后不再校正。
-  double _lastViewportHeight = 0;
+  // 视口边缘淡出长度：行目标顶边进入顶/底 [_kEdgeFadeLength] 后线性淡出到
+  // 全透明。配合外层 ClipRect，保证歌词绝不会画到歌词面板之外
+  // （封面/标题区、控件区）；拖动/浏览期间同样生效。
+  static const _kEdgeFadeLength = 48.0;
 
   /// 前奏圆点阈值（首行 >5s 视为前奏）。
   static const _kIntroThresholdMs = 5000;
@@ -133,7 +149,8 @@ class _LyricViewState extends State<LyricView> {
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScrollPositionChanged);
+    _engine = _createEngine();
+    _ticker = createTicker(_onTick);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _needsJump = true;
@@ -141,49 +158,61 @@ class _LyricViewState extends State<LyricView> {
     });
   }
 
+  LyricEngine _createEngine() => LyricEngine(
+    lineCount: widget.lines.length,
+    lineHeights: List.filled(widget.lines.length, 0),
+    lineStartMs: widget.lines.map((l) => l.startTimeMs).toList(),
+    preset: widget.lyricSpringPreset,
+    springEnabled: widget.lyricSpringEnabled,
+  );
+
   @override
   void didUpdateWidget(covariant LyricView old) {
     super.didUpdateWidget(old);
-    final metricsChanged =
-        old.fontSize != widget.fontSize || old.activeColor != widget.activeColor;
     if (old.lines != widget.lines) {
       _currentIndex = -1;
       _needsJump = true;
-      _layoutCache = List<LyricLineLayout?>.filled(widget.lines.length, null);
-      _measuredWidth = 0;
+      _engine = _createEngine();
+      _layouts = [];
+      _baseHeights = [];
+      _itemHeights = [];
+      _measuredWidth = double.infinity;
+      _measuredDotsLine = null;
       _updateCurrent();
-    } else if (metricsChanged) {
-      _layoutCache = List<LyricLineLayout?>.filled(widget.lines.length, null);
-      _measuredWidth = 0;
-    } else if (old.currentTimeMs != widget.currentTimeMs) {
-      _updateCurrent();
+    } else {
+      final metricsChanged =
+          old.fontSize != widget.fontSize ||
+          old.activeColor != widget.activeColor ||
+          old.showTranslation != widget.showTranslation;
+      if (metricsChanged) {
+        _measuredWidth = double.infinity;
+        _measuredDotsLine = -999;
+      }
+      if (old.lyricSpringPreset != widget.lyricSpringPreset) {
+        _engine.setPreset(widget.lyricSpringPreset);
+      }
+      if (old.lyricSpringEnabled != widget.lyricSpringEnabled) {
+        // 弹簧/缓动模式是引擎内部状态，切换需重建引擎并重新落位。
+        _engine = _createEngine();
+        _needsJump = true;
+      }
+      if (old.currentTimeMs != widget.currentTimeMs) {
+        _updateCurrent();
+      }
     }
   }
 
-  void _onScrollPositionChanged() {
-    if (_autoScrolling) return;
-    if (_pointerDown) return;
-    _startUserScrollHold();
-  }
+  int _effectiveTimeMs(int raw) =>
+      (raw + widget.lyricOffsetMs).clamp(0, 1 << 31);
 
-  void _startUserScrollHold() {
-    final wasHolding = _userScrollHoldTimer != null;
-    _userScrollHoldTimer?.cancel();
-    _userScrollHoldTimer = Timer(_kUserScrollHold, _onUserScrollHoldEnd);
-    // 进入/保持抑制窗口会改变"是否滚动中"，需触发重建让 itemBuilder 重算模糊
-    // （已建 item 不会自动重建）。仅首次进入时重建，滚动通知期间避免刷屏。
-    if (!wasHolding && mounted) setState(() {});
-  }
-
-  void _onUserScrollHoldEnd() {
-    if (_userScrollHoldTimer == null) return;
-    _userScrollHoldTimer = null;
-    if (mounted) setState(() {});
-  }
-
+  /// 当前行变化（播放推进 / 点击 seek）。手动浏览时锚点冻结在
+  /// `heldScrollIndex`，这里只更新高亮/卡拉 OK/缩放/透明度的目标。
   void _updateCurrent() {
     if (widget.lines.isEmpty) {
-      if (_currentIndex != -1) _currentIndex = -1;
+      if (_currentIndex != -1) {
+        _currentIndex = -1;
+        _engine.setCurrent(-1, force: true);
+      }
       return;
     }
     final newIndex = LyricParser.findCurrentLineIndex(
@@ -192,20 +221,12 @@ class _LyricViewState extends State<LyricView> {
     );
     if (newIndex != _currentIndex) {
       _currentIndex = newIndex;
-      if (_pointerDown || _userScrollHoldTimer != null) {
-        return;
-      }
-      _userScrollHoldTimer?.cancel();
-      _userScrollHoldTimer = null;
-      _needsJump = true;
-      _frozenTimeMs = _effectiveTimeMs(widget.currentTimeMs);
-      _scrollToCurrent();
+      _engine.setCurrent(newIndex, force: _needsJump);
+      _scheduleTicks();
     }
   }
 
-  /// 点击行 seek：这是用户的显式意图，不受 3 秒抑制窗口约束——
-  /// 先清掉抑制/拖动标记，立即把当前行切到目标行并滚动，不依赖位置流回传
-  /// （否则惯性滑动的尾部通知会重新打开窗口，导致"惯性期间点击定位失效"）。
+  /// 点击行 seek：这是用户的显式意图，不受 3 秒抑制窗口约束。
   void _handleLineTap(int startTimeMs) {
     _userScrollHoldTimer?.cancel();
     _userScrollHoldTimer = null;
@@ -218,165 +239,226 @@ class _LyricViewState extends State<LyricView> {
       _effectiveTimeMs(startTimeMs),
     );
     if (targetIndex < 0) return;
-    if (targetIndex != _currentIndex) {
-      _currentIndex = targetIndex;
-      setState(() {});
-    }
-    _needsJump = true;
-    _scrollToCurrent();
+    _currentIndex = targetIndex;
+    _engine.resumeFollow();
+    _engine.setCurrent(targetIndex, force: false);
+    _scheduleTicks();
   }
 
-  int _effectiveTimeMs(int raw) =>
-      (raw + widget.lyricOffsetMs).clamp(0, 1 << 31);
+  // ── 帧循环 ──
 
-  /// 解析当前行滚动锚点。
-  ///
-  /// 返回 (内容上 padding, 内容下 padding, ensureVisible alignment)。
-  /// 当前行顶边落在 `topPad` 处，上方为"第 3 句"锚点（约 2 行已播歌词）。
-  /// 下 padding 比上 padding 大：保证末行也能滚到同一锚点（滚动范围 =
-  /// 上下 padding + 内容 - 视口，末行需 (N-1)*行高 的滚动量）。
-  (double, double, double) _scrollGeometry(double viewportHeight) {
-    final lineHeight = widget.fontSize * _kLineHeightFactor;
+  void _scheduleTicks() {
+    if (!_engine.anyMoving) return;
+    if (!_ticker.isActive) {
+      _lastTickerElapsed = null;
+      _ticker.start();
+    }
+  }
+
+  void _onTick(Duration elapsed) {
+    final last = _lastTickerElapsed;
+    _lastTickerElapsed = elapsed;
+    final dtMs = last == null ? 0.0 : (elapsed - last).inMicroseconds / 1000.0;
+    _engine.tick(dtMs);
+    if (mounted) setState(() {});
+    if (!_engine.anyMoving) {
+      _lastTickerElapsed = null;
+      _ticker.stop();
+    }
+  }
+
+  // ── 手动浏览 ──
+
+  void _startUserScrollHold() {
+    final wasHolding = _userScrollHoldTimer != null;
+    _userScrollHoldTimer?.cancel();
+    _userScrollHoldTimer = Timer(_kUserScrollHold, _onUserScrollHoldEnd);
+    if (!wasHolding && mounted) setState(() {});
+  }
+
+  void _onUserScrollHoldEnd() {
+    if (_userScrollHoldTimer == null) return;
+    _userScrollHoldTimer = null;
+    if (!mounted) return;
+    _engine.resumeFollow();
+    _scheduleTicks();
+    setState(() {});
+  }
+
+  void _onPointerDown(PointerDownEvent e) {
+    _pointerDownPositions[e.pointer] = e.position;
+    if (_pointerDownPositions.length != 1) return;
+    // 仅当从"无指针"到"第一个指针"时才重置拖动标记；第二根手指按下不抹掉
+    // 首指的拖动状态。
+    _pointerDragged = false;
+    _pointerDown = true;
+    _userScrollHoldTimer?.cancel();
+    _userScrollHoldTimer = null;
+    _dragStartY = e.position.dy;
+    _dragStartScrollOffset = _engine.userScrollOffset;
+    // 手动浏览期间冻结对齐行：切句不打扰用户浏览。
+    _engine.setHeldScrollIndex(_currentIndex);
+    // 手指按下 → scrolling 变 true（解除景深模糊）。
+    setState(() {});
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    final start = _pointerDownPositions[e.pointer];
+    if (start == null) return;
+    if (!_pointerDragged && (e.position - start).distance > kTouchSlop) {
+      _pointerDragged = true;
+      _dragStartY = start.dy;
+      _dragStartScrollOffset = _engine.userScrollOffset;
+    }
+    if (!_pointerDragged) return;
+    final (min, max) = _engine.userScrollBounds();
+    final v = (_dragStartScrollOffset - (e.position.dy - _dragStartY)).clamp(
+      min,
+      max,
+    );
+    _engine.setUserScrollOffset(v, force: true);
+    setState(() {});
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    _pointerDownPositions.remove(e.pointer);
+    if (_pointerDownPositions.isNotEmpty) return;
+    final wasDown = _pointerDown;
+    _pointerDown = false;
+    if (_pointerDragged) {
+      _pointerDragged = false;
+      _startUserScrollHold();
+    } else if (wasDown) {
+      // 纯轻点：解除按下时冻结的对齐锚点，恢复跟随（不弹回，只是让
+      // 后续切句能正常跟）。scrolling true→false，需重建恢复模糊。
+      _engine.resumeFollow();
+      _scheduleTicks();
+      setState(() {});
+    }
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    _pointerDownPositions.remove(e.pointer);
+    if (_pointerDownPositions.isNotEmpty) return;
+    final wasDown = _pointerDown;
+    _pointerDown = false;
+    _pointerDragged = false;
+    if (wasDown) setState(() {});
+  }
+
+  void _onPointerSignal(PointerSignalEvent e) {
+    if (e is! PointerScrollEvent || e.scrollDelta.dy == 0) return;
+    _pointerDown = false;
+    _pointerDragged = false;
+    _pointerDownPositions.clear();
+    _engine.setHeldScrollIndex(_currentIndex);
+    final (min, max) = _engine.userScrollBounds();
+    final v = (_engine.userScrollOffset + e.scrollDelta.dy).clamp(min, max);
+    _engine.setUserScrollOffset(v, force: true);
+    _startUserScrollHold();
+    // 每次滚轮都要重建：第二次起 _startUserScrollHold 不再触发 setState。
+    setState(() {});
+  }
+
+  void _onMouseExit() {
+    final wasHolding = _userScrollHoldTimer != null;
+    _userScrollHoldTimer?.cancel();
+    _userScrollHoldTimer = null;
+    if (wasHolding) {
+      _engine.resumeFollow();
+      _scheduleTicks();
+      setState(() {});
+    }
+  }
+
+  // ── 测量 ──
+
+  /// 当前行顶边应落在视口的比例（≈"第 3 句"锚点）。
+  double _alignFraction(double viewportHeight) {
     final fraction = _kPlayedLyricViewportFraction
         .clamp(_kPlayedFractionMin, _kPlayedFractionMax)
         .toDouble();
     final desiredPlayedSpace = viewportHeight * fraction;
     final minimumVisibleSpace =
-        _kTopFadeLength + _kFocusedLyricMaskSafePadding + _kKeepAliveZone;
+        _kMinPlayedSpace + _kAnchorSafePadding + _kKeepAliveZone;
     final resolvedPlayedSpace = desiredPlayedSpace > minimumVisibleSpace
         ? desiredPlayedSpace
         : minimumVisibleSpace;
-    final compensation = lineHeight * _kFocusedVisualCompensationRatio;
     final effectiveOffset =
-        (resolvedPlayedSpace + compensation - _kKeepAliveZone)
+        (resolvedPlayedSpace - _kKeepAliveZone)
             .clamp(_kMinimumOffset, double.infinity)
             .toDouble();
     final verticalPad = effectiveOffset + _kKeepAliveZone;
-    final alignment = (verticalPad / viewportHeight).clamp(0.0, 1.0).toDouble();
-    // 末行可达锚点需 bottomPad >= viewportH - topPad - itemHeight。
-    // itemHeight 保守取小（fontSize*2）：真实行高更大时只会更可达。
-    final bottomPad = math.max(
-      verticalPad,
-      viewportHeight - verticalPad - widget.fontSize * 2.0,
-    );
-    return (verticalPad, bottomPad, alignment);
+    return (verticalPad / viewportHeight).clamp(0.0, 1.0).toDouble();
   }
 
-  Future<void> _scrollToCurrent() async {
-    if (!_scrollController.hasClients || _currentIndex < 0) return;
-    if (_autoScrolling) return;
-    _autoScrolling = true;
-    // 自动滚动期间景深模糊应解除：触发重建让 itemBuilder 重算 blurSigma。
-    if (mounted) setState(() {});
-    try {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || _currentIndex < 0) return;
+  String? _translationTextFor(LyricLine line) {
+    if (!widget.showTranslation) return null;
+    if ((line.translation ?? '').isNotEmpty) return line.translation;
+    if ((line.roman ?? '').isNotEmpty) return line.roman;
+    return null;
+  }
 
-      for (int attempt = 0; attempt < 8; attempt++) {
-        if (!mounted || _currentIndex < 0) return;
-        if (!_scrollController.hasClients) return;
+  /// 行内容高度：画布 + 翻译（假名原文额外留间距）。不含行间 padding 与圆点槽。
+  double _contentHeightOf(
+    int index,
+    LyricLineLayout layout,
+    double width,
+    TextStyle translationStyle,
+  ) {
+    final line = widget.lines[index];
+    double h = layout.totalHeight;
+    final translation = _translationTextFor(line);
+    if (translation != null) {
+      final painter = TextPainter(
+        text: TextSpan(text: translation, style: translationStyle),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: width);
+      h += (containsJapaneseKana(line.text) ? 7 : 4) + painter.height;
+    }
+    return h;
+  }
 
-        final ctx = _activeKey.currentContext;
-        if (ctx != null && ctx.mounted) {
-          final viewportH = _scrollController.position.viewportDimension;
-          final (_, _, alignment) = _scrollGeometry(viewportH);
-          await Scrollable.ensureVisible(
-            ctx,
-            alignment: alignment,
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-          );
-          if (!mounted) return;
-          // 歌词面板过渡动画期间视口高度仍在变化：本次 ensureVisible 是按中途
-          // 小视口计算的，必须保留 _needsJump 让重试循环在视口稳定后重新定位，
-          // 否则切歌词页首帧会把当前行停在错误位置。
-          final stable =
-              _scrollController.hasClients &&
-              (_scrollController.position.viewportDimension - viewportH)
-                      .abs() <=
-                  1.0;
-          if (stable) _needsJump = false;
-          return;
-        }
-
-        _jumpToEstimated(attempt);
-        await WidgetsBinding.instance.endOfFrame;
-      }
-    } finally {
-      _autoScrolling = false;
-      _frozenTimeMs = null;
-      if (mounted) setState(() {});
-      if (_needsJump &&
-          mounted &&
-          !_pointerDown &&
-          _userScrollHoldTimer == null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted &&
-              _needsJump &&
-              !_autoScrolling &&
-              !_pointerDown &&
-              _userScrollHoldTimer == null) {
-            _scrollToCurrent();
-          }
-        });
+  /// 测量全部行的排版与高度（按宽度 + 圆点行缓存）。
+  void _ensureMeasurements(
+    double width,
+    TextStyle textStyle,
+    TextStyle translationStyle,
+    int? dotLineIndex,
+  ) {
+    final n = widget.lines.length;
+    if (_layouts.length != n) {
+      _layouts = List.generate(n, (_) => null);
+      _baseHeights = List.filled(n, 0);
+      _itemHeights = List.filled(n, 0);
+      _measuredWidth = double.infinity;
+      _measuredDotsLine = null;
+    }
+    final widthChanged = (width - _measuredWidth).abs() > 0.5;
+    final dotsChanged = dotLineIndex != _measuredDotsLine;
+    if (!widthChanged && !dotsChanged) return;
+    if (widthChanged) {
+      _measuredWidth = width;
+      for (var i = 0; i < n; i++) {
+        final layout = measureLyricLine(
+          line: widget.lines[i],
+          style: textStyle,
+          availableWidth: width,
+          glowColor: widget.activeColor,
+        );
+        _layouts[i] = layout;
+        _baseHeights[i] = _contentHeightOf(i, layout, width, translationStyle);
       }
     }
-  }
-
-  void _jumpToEstimated(int attempt) {
-    final pos = _scrollController.position;
-    final viewportH = pos.viewportDimension;
-    if (viewportH <= 0) return;
-
-    final (topPad, bottomPad, alignment) = _scrollGeometry(viewportH);
-    // 用已布局行的高度均值估算当前行偏移：SliverList 的 maxScrollExtent 基于
-    // 实际已建行 + 平均估计，比固定字号倍数更贴近真实行高（含翻译/换行/圆点）。
-    final itemCount = widget.lines.length;
-    final estimatedContentHeight =
-        pos.maxScrollExtent + viewportH - topPad - bottomPad;
-    final estimatedLineH = itemCount > 0
-        ? estimatedContentHeight / itemCount
-        : widget.fontSize * 2.5;
-    final baseTarget =
-        topPad +
-        _currentIndex * estimatedLineH +
-        estimatedLineH / 2 -
-        viewportH * alignment;
-
-    final offset = (attempt ~/ 2 + 1) * 20.0 * (attempt.isEven ? 1 : -1);
-    final target = baseTarget + offset;
-    final clamped = target.clamp(pos.minScrollExtent, pos.maxScrollExtent);
-    pos.jumpTo(clamped);
-  }
-
-  @override
-  void dispose() {
-    _userScrollHoldTimer?.cancel();
-    _scrollController.removeListener(_onScrollPositionChanged);
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  /// 取行排版（按当前测量宽度 + 字号缓存，失效后重建）。
-  LyricLineLayout _layoutFor(int index, double width, TextStyle style) {
-    if (index >= _layoutCache.length) {
-      _layoutCache = List<LyricLineLayout?>.filled(widget.lines.length, null);
-      _measuredWidth = 0;
+    _measuredDotsLine = dotLineIndex;
+    for (var i = 0; i < n; i++) {
+      // 16 = 行间上下 padding；28 = 圆点槽（4 顶部留白 + 16 圆点 + 8 底部留白）。
+      _itemHeights[i] = _baseHeights[i] + 16 + (i == dotLineIndex ? 28 : 0);
     }
-    if ((width - _measuredWidth).abs() > 0.5 || _layoutCache[index] == null) {
-      if ((width - _measuredWidth).abs() > 0.5) {
-        _layoutCache.fillRange(0, _layoutCache.length, null);
-        _measuredWidth = width;
-      }
-      _layoutCache[index] = measureLyricLine(
-        line: widget.lines[index],
-        style: style,
-        availableWidth: width,
-        glowColor: widget.activeColor,
-      );
-    }
-    return _layoutCache[index]!;
+    _measurementsDirty = true;
   }
+
+  // ── 圆点 ──
 
   /// 前奏圆点：首行 start >5s 且当前时间在首行之前。
   bool _showIntroDots(int currentTimeMs) {
@@ -401,16 +483,33 @@ class _LyricViewState extends State<LyricView> {
     return null;
   }
 
-  /// 景深模糊 sigma（柔和梯度）：按"距当前行的归一化距离"二次曲线计算。
-  /// 距离 = 行距数 / 可视区该方向的可见行数（当前行上方可见行数 / 下方可见
-  /// 行数），归一化到 0..1；t² 曲线让靠近当前行的行几乎清晰、顶部/底部边缘
-  /// 最模糊，避免旧版"上下两三行外全糊"与硬性清晰带的突兀。
-  double _blurForIndex(int index, int aboveVisible, int belowVisible) {
-    final d = index - _currentIndex;
+  // ── 景深模糊 ──
+
+  /// 景深模糊 sigma：按"距当前行的行数"指数增长，与视口尺寸/字号无关
+  /// （窄屏/宽屏表现一致）。相邻行即有可见模糊，越远越糊、趋近
+  /// [_kBlurMaxSigma]；当前行恒 0。
+  double _blurSigmaFor(int index) {
+    final d = (index - _currentIndex).abs();
     if (d == 0) return 0;
-    final span = d < 0 ? math.max(1, aboveVisible) : math.max(1, belowVisible);
-    final t = math.min(1.0, d.abs().toDouble() / span);
-    return t * t * _kBlurMaxSigma;
+    return _kBlurMaxSigma * (1 - math.exp(-d / _kBlurHalfRow));
+  }
+
+  /// 视口边缘淡出：行目标顶边接近/越出视口顶/底时线性淡出到全透明。
+  /// 配合外层 [ClipRect] 保证歌词绝不会画到歌词面板（封面/标题/控件）之外；
+  /// 拖动/浏览期间同样生效，避免"一拖就看到全部歌词飘到别处"。
+  double _edgeFadeOf(int index) {
+    final h = _engine.viewportHeight;
+    if (h <= 0) return 1.0;
+    final y = _engine.yOf(index);
+    var f = 1.0;
+    if (y < _kEdgeFadeLength) {
+      f = math.min(f, math.max(0.0, y / _kEdgeFadeLength));
+    }
+    final bottomGap = h - y;
+    if (bottomGap < _kEdgeFadeLength) {
+      f = math.min(f, math.max(0.0, bottomGap / _kEdgeFadeLength));
+    }
+    return f;
   }
 
   @override
@@ -437,218 +536,185 @@ class _LyricViewState extends State<LyricView> {
           fontWeight: FontWeight.bold,
         ) ??
         TextStyle(fontSize: textScaler.scale(18));
+    final translationStyle =
+        theme.textTheme.bodyMedium?.copyWith(
+          fontSize: widget.fontSize * 0.7,
+          fontWeight: FontWeight.w400,
+        ) ??
+        TextStyle(fontSize: widget.fontSize * 0.7);
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notif) => false,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final maxHeight = constraints.maxHeight;
-          if ((maxHeight - _lastViewportHeight).abs() > 1.0) {
-            _lastViewportHeight = maxHeight;
-            // 视口高度变化（歌词面板过渡/重新进入歌词页）：当前行锚点已失效，
-            // 重新定位，不依赖位置流回传（暂停/换句未变时位置流不会触发滚动）。
-            if (maxHeight >= _kMinScrollHeight &&
-                !_pointerDown &&
-                _userScrollHoldTimer == null) {
-              _needsJump = true;
-            }
-          }
-          final (topPad, bottomPad, _) = _scrollGeometry(maxHeight);
-          if (_needsJump &&
-              maxHeight >= _kMinScrollHeight &&
-              !_autoScrolling &&
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxHeight = constraints.maxHeight;
+        final maxWidth = constraints.maxWidth;
+
+        if ((maxHeight - _lastViewportHeight).abs() > 1.0) {
+          _lastViewportHeight = maxHeight;
+          // 视口高度变化（歌词面板过渡/重新进入歌词页）：当前行锚点已失效，
+          // 重新定位（引擎里 force 落位）。
+          if (maxHeight >= _kMinScrollHeight &&
               !_pointerDown &&
               _userScrollHoldTimer == null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              if (_needsJump &&
-                  !_autoScrolling &&
-                  !_pointerDown &&
-                  _userScrollHoldTimer == null) {
-                _scrollToCurrent();
-              }
-            });
+            _needsJump = true;
           }
+        }
 
-          final displayTimeMs =
-              _frozenTimeMs ?? _effectiveTimeMs(widget.currentTimeMs);
-          final introDots = _showIntroDots(displayTimeMs);
-          final interludeIndex = _interludeIndex(displayTimeMs);
+        final displayTimeMs = _effectiveTimeMs(widget.currentTimeMs);
+        final introDots = _showIntroDots(displayTimeMs);
+        final interludeIndex = _interludeIndex(displayTimeMs);
+        final dotLineIndex = introDots ? 0 : interludeIndex;
 
-          // 景深模糊梯度：以"距当前行的归一化距离"为自变量，靠近当前行几乎
-          // 清晰，往可视区顶部/底部边缘渐强。滑动/拖动/自动滚动期间全部清晰。
-          final itemH = widget.fontSize * _kLineHeightFactor + 16;
-          final belowVisible = math.max(
-            1,
-            ((maxHeight - topPad) / itemH).floor(),
-          );
-          final aboveVisible = math.max(1, (topPad / itemH).floor());
-          final scrolling =
-              _autoScrolling || _pointerDown || _userScrollHoldTimer != null;
+        var ready = false;
+        if (maxHeight >= _kMinScrollHeight) {
+          final width = math.max(0.0, maxWidth - kLyricLeftBuffer - 48);
+          _ensureMeasurements(width, textStyle, translationStyle, dotLineIndex);
+          ready = _layouts.isNotEmpty && _layouts.first != null;
+          if (_measurementsDirty) {
+            _measurementsDirty = false;
+            _engine.lineHeights = List.of(_itemHeights);
+            _heightsChanged = true;
+          }
+          if (ready) {
+            _engine.setViewportHeight(maxHeight);
+            _engine.setAlignFraction(_alignFraction(maxHeight));
+          }
+        }
 
-          return Listener(
-            onPointerDown: (e) {
-              _pointerDownPositions[e.pointer] = e.position;
-              if (_pointerDownPositions.length == 1) {
-                // 仅当从"无指针"到"第一个指针"时才重置拖动标记；
-                // 第二根手指按下不抹掉首指的拖动状态。
-                _pointerDragged = false;
-                _pointerDown = true;
-                _userScrollHoldTimer?.cancel();
-                _userScrollHoldTimer = null;
-                // 手指按下 → scrolling 变 true（解除景深模糊），触发重建
-                // 让 itemBuilder 重算 blurSigma（已建 item 不会自动重建）。
-                setState(() {});
-              }
-            },
-            onPointerMove: (e) {
-              final start = _pointerDownPositions[e.pointer];
-              if (start != null && (e.position - start).distance > kTouchSlop) {
-                _pointerDragged = true;
-              }
-            },
-            onPointerUp: (e) {
-              _pointerDownPositions.remove(e.pointer);
-              if (_pointerDownPositions.isEmpty) {
-                final wasDown = _pointerDown;
-                _pointerDown = false;
-                if (_pointerDragged) {
-                  // 进入浏览抑制窗口（scrolling 保持 true），_startUserScrollHold
-                  // 内部已按需 setState。
-                  _pointerDragged = false;
-                  _startUserScrollHold();
-                } else if (wasDown) {
-                  // 纯轻点：scrolling true→false，需重建恢复模糊。
-                  setState(() {});
-                }
-              }
-            },
-            onPointerCancel: (e) {
-              _pointerDownPositions.remove(e.pointer);
-              if (_pointerDownPositions.isEmpty) {
-                final wasDown = _pointerDown;
-                _pointerDown = false;
-                _pointerDragged = false;
-                if (wasDown) setState(() {});
-              }
-            },
-            child: MouseRegion(
-              onExit: (_) {
-                final wasHolding = _userScrollHoldTimer != null;
-                _userScrollHoldTimer?.cancel();
-                _userScrollHoldTimer = null;
-                if (wasHolding) setState(() {});
-              },
-              child: ShaderMask(
-                shaderCallback: (bounds) {
-                  final topFade = (_kTopFadeLength / bounds.height).clamp(
-                    0.0,
-                    0.48,
-                  );
-                  final bottomFade = (_kBottomFadeLength / bounds.height).clamp(
-                    0.0,
-                    0.48,
-                  );
-                  return LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: const [
-                      Colors.transparent,
-                      Colors.black,
-                      Colors.black,
-                      Colors.transparent,
-                    ],
-                    stops: [
-                      0.0,
-                      topFade,
-                      (1 - bottomFade).clamp(0.0, 1.0),
-                      1.0,
-                    ],
-                  ).createShader(bounds);
-                },
-                blendMode: BlendMode.dstIn,
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: EdgeInsets.only(
-                    top: topPad,
-                    bottom: bottomPad,
-                    left: kLyricLeftBuffer,
-                  ),
-                  itemCount: widget.lines.length,
-                  itemBuilder: (context, i) {
-                    final line = widget.lines[i];
-                    final isActive = i == _currentIndex;
-                    final layout = _layoutFor(
-                      i,
-                      constraints.maxWidth - kLyricLeftBuffer - 48,
-                      textStyle,
-                    );
-                    final blurSigma = (widget.lyricDepthBlur && !scrolling)
-                        ? _blurForIndex(i, aboveVisible, belowVisible)
-                        : 0.0;
-                    final showDots =
-                        (introDots && i == 0) || i == interludeIndex;
+        if ((_needsJump || _heightsChanged) &&
+            !_pointerDown &&
+            _userScrollHoldTimer == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_pointerDown || _userScrollHoldTimer != null) return;
+            final force = _needsJump;
+            _needsJump = false;
+            _heightsChanged = false;
+            _engine.setCurrent(_currentIndex, force: force);
+            _scheduleTicks();
+            setState(() {});
+          });
+        }
 
-                    Widget leadingDots;
-                    if (showDots) {
-                      final start = i == 0 ? 0 : widget.lines[i - 1].endTimeMs;
-                      final end = i == 0
-                          ? widget.lines[0].startTimeMs
-                          : line.startTimeMs;
-                      leadingDots = Padding(
-                        padding: const EdgeInsets.only(bottom: 8, left: 24),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: BreathingDots(
-                            startTimeMs: start,
-                            endTimeMs: end,
-                            currentTimeMs: displayTimeMs,
-                            color: widget.activeColor,
-                          ),
-                        ),
-                      );
-                    } else {
-                      leadingDots = const SizedBox.shrink();
-                    }
+        // 景深模糊：滑动/拖动/浏览抑制期间全部清晰（仅保留视口边缘淡出）。
+        final scrolling = _pointerDown || _userScrollHoldTimer != null;
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: LyricLineVisual(
-                        isFocused: isActive,
-                        blurSigma: blurSigma,
-                        child: LyricLineView(
-                          key: isActive ? _activeKey : null,
-                          line: line,
-                          layout: layout,
-                          isActive: isActive,
-                          currentTimeMs: displayTimeMs,
-                          activeColor: widget.activeColor,
-                          inactiveColor: widget.inactiveColor,
-                          fontSize: widget.fontSize,
-                          translationFontSize: widget.fontSize * 0.7,
-                          showTranslation: widget.showTranslation,
-                          lineLyricRevealMode: widget.lineLyricRevealMode,
-                          leadingDots: showDots ? leadingDots : null,
-                          onTapLine: widget.onSeekLine == null
-                              ? null
-                              : () => _handleLineTap(line.startTimeMs),
-                          onLongPressLine: widget.onLyricLongPress == null
-                              ? (widget.onSeekLine == null
-                                    ? null
-                                    : () =>
-                                          widget.onSeekLine!(line.startTimeMs))
-                              : () =>
-                                    widget.onLyricLongPress!(line.startTimeMs),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+        final children = <Widget>[
+          const SizedBox.expand(),
+          if (ready)
+            for (var i = 0; i < widget.lines.length; i++)
+              _buildLine(
+                context,
+                i,
+                maxWidth,
+                displayTimeMs,
+                introDots,
+                interludeIndex,
+                scrolling,
+              ),
+        ];
+
+        return Listener(
+          onPointerDown: _onPointerDown,
+          onPointerMove: _onPointerMove,
+          onPointerUp: _onPointerUp,
+          onPointerCancel: _onPointerCancel,
+          onPointerSignal: _onPointerSignal,
+          child: MouseRegion(
+            onExit: (_) => _onMouseExit(),
+            child: SizedBox(
+              width: maxWidth,
+              height: maxHeight,
+              child: Stack(
+                // 视口硬裁剪兜底：配合每行视口边缘淡出，歌词绝不会画到
+                // 歌词面板之外（封面/标题区、控件区）。
+                clipBehavior: Clip.hardEdge,
+                alignment: Alignment.topLeft,
+                children: children,
               ),
             ),
-          );
-        },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLine(
+    BuildContext context,
+    int i,
+    double maxWidth,
+    int displayTimeMs,
+    bool introDots,
+    int? interludeIndex,
+    bool scrolling,
+  ) {
+    final line = widget.lines[i];
+    final isActive = i == _currentIndex;
+    final layout = _layouts[i];
+    if (layout == null) return const SizedBox.shrink();
+
+    final dofEnabled = widget.lyricDepthBlur && !scrolling;
+    final blurSigma = dofEnabled ? _blurSigmaFor(i) : 0.0;
+    final edgeFade = _edgeFadeOf(i);
+    final showDots = (introDots && i == 0) || i == interludeIndex;
+
+    Widget leadingDots = const SizedBox.shrink();
+    if (showDots) {
+      final start = i == 0 ? 0 : widget.lines[i - 1].endTimeMs;
+      final end = i == 0 ? widget.lines[0].startTimeMs : line.startTimeMs;
+      leadingDots = Padding(
+        padding: const EdgeInsets.only(bottom: 8, left: 24),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: BreathingDots(
+            startTimeMs: start,
+            endTimeMs: end,
+            currentTimeMs: displayTimeMs,
+            color: widget.activeColor,
+          ),
+        ),
+      );
+    }
+
+    return LyricLineVisual(
+      translateY: _engine.yOf(i),
+      scale: _engine.scaleOf(i),
+      alpha: _engine.alphaOf(i) * edgeFade,
+      blurSigma: blurSigma,
+      child: Padding(
+        padding: const EdgeInsets.only(left: kLyricLeftBuffer),
+        child: SizedBox(
+          width: maxWidth - kLyricLeftBuffer,
+          height: _itemHeights[i],
+          child: LyricLineView(
+            line: line,
+            layout: layout,
+            isActive: isActive,
+            currentTimeMs: displayTimeMs,
+            activeColor: widget.activeColor,
+            inactiveColor: widget.inactiveColor,
+            fontSize: widget.fontSize,
+            translationFontSize: widget.fontSize * 0.7,
+            showTranslation: widget.showTranslation,
+            lineLyricRevealMode: widget.lineLyricRevealMode,
+            leadingDots: showDots ? leadingDots : null,
+            onTapLine: widget.onSeekLine == null
+                ? null
+                : () => _handleLineTap(line.startTimeMs),
+            onLongPressLine: widget.onLyricLongPress == null
+                ? (widget.onSeekLine == null
+                      ? null
+                      : () => widget.onSeekLine!(line.startTimeMs))
+                : () => widget.onLyricLongPress!(line.startTimeMs),
+          ),
+        ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _userScrollHoldTimer?.cancel();
+    super.dispose();
   }
 }
