@@ -459,7 +459,7 @@ void main() {
     expect(blurOf(0), greaterThan(blurOf(2)), reason: '越往视口顶部越模糊');
   });
 
-  testWidgets('景深淡出：越远行越透明（视口外溶解），当前行不透明', (tester) async {
+  testWidgets('景深淡出：视口外行完全透明（边缘溶解），当前行不透明', (tester) async {
     final lines = buildLines();
     await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
     await tester.pump();
@@ -542,9 +542,9 @@ void main() {
     }
     expect(hasOutOfTop, isTrue, reason: '拖动应让部分行滚出视口顶');
 
-    // 视口内（非边缘）的行保持引擎透明度，不被景深索引淡出压低。
+    // 视口内（中部，避开边缘淡出区）的行保持引擎透明度。
     for (final w in visuals) {
-      if (w.translateY >= 60 && w.translateY <= 540) {
+      if (w.translateY >= 80 && w.translateY <= 480) {
         expect(
           w.alpha,
           anyOf(closeTo(1.0, 1e-9), closeTo(0.35, 1e-9)),

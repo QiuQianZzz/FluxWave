@@ -132,7 +132,7 @@ class _LyricViewState extends State<LyricView>
   // 一致）：相邻行即有可见模糊，约 [_kBlurHalfRow] 行距达一半最大模糊，
   // 远处趋近 [_kBlurMaxSigma]。视口顶/底用像素淡出（_edgeFadeOf）溶解，
   // 配合外层硬裁剪保证不画到面板之外。
-  static const _kBlurMaxSigma = 2.4;
+  static const _kBlurMaxSigma = 2.0;
   static const _kBlurHalfRow = 1.5;
 
   // 视口边缘淡出长度：行目标顶边进入顶/底 [_kEdgeFadeLength] 后线性淡出到
@@ -494,20 +494,24 @@ class _LyricViewState extends State<LyricView>
     return _kBlurMaxSigma * (1 - math.exp(-d / _kBlurHalfRow));
   }
 
-  /// 视口边缘淡出：行目标顶边接近/越出视口顶/底时线性淡出到全透明。
-  /// 配合外层 [ClipRect] 保证歌词绝不会画到歌词面板（封面/标题/控件）之外；
-  /// 拖动/浏览期间同样生效，避免"一拖就看到全部歌词飘到别处"。
+/// 视口边缘淡出：按行中心与视口顶/底的距离线性淡出到全透明（区间
+  /// = 半行高 + [_kEdgeFadeLength]），高行（带翻译）不会在仍有一半可
+  /// 见时就整行消失。配合外层 [ClipRect] 保证歌词绝不会画到歌词面板
+  /// （封面/标题/控件）之外；拖动/浏览期间同样生效。
   double _edgeFadeOf(int index) {
     final h = _engine.viewportHeight;
     if (h <= 0) return 1.0;
     final y = _engine.yOf(index);
+    final itemH = _itemHeights[index];
+    final zone = itemH / 2 + _kEdgeFadeLength;
+    final center = y + itemH / 2;
     var f = 1.0;
-    if (y < _kEdgeFadeLength) {
-      f = math.min(f, math.max(0.0, y / _kEdgeFadeLength));
+    if (center < zone) {
+      f = math.min(f, math.max(0.0, center / zone));
     }
-    final bottomGap = h - y;
-    if (bottomGap < _kEdgeFadeLength) {
-      f = math.min(f, math.max(0.0, bottomGap / _kEdgeFadeLength));
+    final bottomGap = h - center;
+    if (bottomGap < zone) {
+      f = math.min(f, math.max(0.0, bottomGap / zone));
     }
     return f;
   }
@@ -625,9 +629,10 @@ class _LyricViewState extends State<LyricView>
               width: maxWidth,
               height: maxHeight,
               child: Stack(
-                // 视口硬裁剪兜底：配合每行视口边缘淡出，歌词绝不会画到
-                // 歌词面板之外（封面/标题区、控件区）。
-                clipBehavior: Clip.hardEdge,
+                // 视口裁剪兜底：配合每行视口边缘淡出，歌词绝不会画到
+                // 歌词面板之外（封面/标题区、控件区）。抗锯齿避免模糊
+                // 像素正好切在盒边时出现毛边。
+                clipBehavior: Clip.antiAlias,
                 alignment: Alignment.topLeft,
                 children: children,
               ),
