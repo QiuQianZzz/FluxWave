@@ -120,7 +120,7 @@ class NeteaseClient {
 
   static final Random _rng = Random();
 
-  /// 拉取并校验/解密 xeapi 公钥包(复刻参考 `xeapi.ts` 的 fetchPublicKey)。
+  /// 拉取并校验/解密 xeapi 公钥包。
   Future<XeapiPublicKeyState> fetchPublicKey() async {
     final nonce = StringBuffer();
     for (var i = 0; i < 16; i++) {

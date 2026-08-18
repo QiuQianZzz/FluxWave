@@ -766,7 +766,7 @@ void main() {
     expect(topPadOf(tester, 'line 0'), 28, reason: '③ 二次进入前奏：line 0 文字下推 28，圆点不叠字');
   });
 
-  testWidgets('圆点动画锚定：进入/seek 重锚定，正常播放推进不重锚（对齐 AMLL）', (tester) async {
+  testWidgets('圆点动画锚定：进入/seek 重锚定，正常播放推进不重锚', (tester) async {
     final lines = [
       LyricLine(text: 'line 0', startTimeMs: 8000, endTimeMs: 9000),
       for (var i = 1; i < 8; i++)
@@ -806,5 +806,79 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(anchor(), 6000, reason: '大幅前跳应重新锚定');
+  });
+
+  testWidgets('圆点 60fps 时钟：ticker 逐帧推进，位置更新对表', (tester) async {
+    final lines = [
+      LyricLine(text: 'line 0', startTimeMs: 8000, endTimeMs: 9000),
+      for (var i = 1; i < 8; i++)
+        LyricLine(
+          text: 'line $i',
+          startTimeMs: 8000 + i * 2000,
+          endTimeMs: 8000 + (i + 1) * 2000,
+        ),
+    ];
+    int dotsTime() =>
+        tester.widget<BreathingDots>(find.byType(BreathingDots)).currentTimeMs;
+
+    // 挂载：圆点出现但尚无位置更新 → 冻结在初始值。
+    await tester.pumpWidget(wrap(lines, 0));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsOneWidget);
+    expect(dotsTime(), 0, reason: '首次挂载无位置更新，时钟停在初始值');
+
+    // 收到位置更新（500ms）：对表 + 解冻，此后 ticker 逐帧推进时钟。
+    await tester.pumpWidget(wrap(lines, 500));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    final t1 = dotsTime();
+    expect(t1, greaterThan(500), reason: 'ticker 在两次位置更新之间持续推进时钟');
+    expect(t1, lessThan(600), reason: '只推进了几帧，不会跳变');
+
+    // 位置流推进（700ms）：时钟重新对表，再继续逐帧。
+    await tester.pumpWidget(wrap(lines, 700));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    final t2 = dotsTime();
+    expect(t2, greaterThanOrEqualTo(700), reason: '对表后从新位置继续推进');
+    expect(t2, lessThan(760), reason: '仅一帧，未大幅漂移');
+  });
+
+  testWidgets('圆点时钟暂停冻结：停止推进超过超时不再前进，恢复后对表', (tester) async {
+    final lines = [
+      LyricLine(text: 'line 0', startTimeMs: 8000, endTimeMs: 9000),
+      for (var i = 1; i < 8; i++)
+        LyricLine(
+          text: 'line $i',
+          startTimeMs: 8000 + i * 2000,
+          endTimeMs: 8000 + (i + 1) * 2000,
+        ),
+    ];
+    int dotsTime() =>
+        tester.widget<BreathingDots>(find.byType(BreathingDots)).currentTimeMs;
+
+    await tester.pumpWidget(wrap(lines, 0));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(wrap(lines, 500));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    final t1 = dotsTime();
+    expect(t1, greaterThan(500), reason: '前置：时钟随 ticker 推进');
+
+    // 超过暂停超时（1.2s）无新位置 → 冻结。
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    final t2 = dotsTime();
+    expect(t2, t1, reason: '冻结后时钟不再前进');
+
+    // 恢复位置更新 → 解冻并对表。
+    await tester.pumpWidget(wrap(lines, 700));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    final t3 = dotsTime();
+    expect(t3, greaterThanOrEqualTo(700), reason: '恢复后从新位置继续');
   });
 }

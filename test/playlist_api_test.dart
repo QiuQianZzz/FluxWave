@@ -100,7 +100,7 @@ void main() {
       expect(findLikedPlaylistId([other, liked], 100), 10);
     });
 
-    test('findLikedPlaylistId：无我喜欢时兜底首个歌单（对齐 SNext）', () {
+    test('findLikedPlaylistId：无我喜欢时兜底首个歌单', () {
       final a = Playlist.fromJson({
         'id': 30,
         'name': 'A',

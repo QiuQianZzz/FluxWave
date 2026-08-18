@@ -14,11 +14,11 @@ import 'lyric_engine.dart';
 import 'lyric_layout.dart';
 import 'lyric_line.dart';
 
-/// 歌词列表视图（AMLL 布局引擎版）。
+/// 歌词列表视图。
 ///
-/// - 用 [LyricEngine]（对标 AMLL `calcLayout`）做"当前行驱动 + 每行独立
-///   posY/scale 弹簧 + 级联延迟 + 动态弹簧参数"，[Stack] + [Transform.translate]
-///   绝对定位渲染所有行（无 ListView/ScrollController）。
+/// - [LyricEngine] 做"当前行驱动 + 每行独立 posY/scale 弹簧 + 级联延迟
+///   + 动态弹簧参数"，[Stack] + [Transform.translate] 绝对定位渲染所有行
+///   （无 ListView/ScrollController）。
 /// - 换句时每行错峰弹向新目标 → "不同行歌词上来时的不一致错落效果"。
 /// - 交互保留：点行 seek、长按、手动拖动（跟手 + 3 秒抑制窗口 + 自动回正）、
 ///   鼠标滚轮浏览、景深（模糊 + 淡出）。
@@ -52,6 +52,10 @@ class LyricView extends StatefulWidget {
   /// 模糊（仅保留视口边缘淡出）。
   final bool lyricDepthBlur;
 
+  /// 行级歌词（LRC）卡拉 OK 渐变的淡出宽度，相对当前字号的比例。渐变起点
+  /// 固定、长度 = `wordFadeWidth × fontSize`。
+  final double wordFadeWidth;
+
   /// 是否启用歌词弹簧动画（行切换时每行独立 posY/scale 弹簧 + 级联延迟）。
   final bool lyricSpringEnabled;
 
@@ -69,6 +73,7 @@ class LyricView extends StatefulWidget {
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
     this.lyricDepthBlur = true,
+    this.wordFadeWidth = 0.5,
     this.lyricSpringEnabled = true,
     this.lyricSpringPreset = LyricSpringPreset.standard,
     this.onSeekLine,
@@ -115,10 +120,28 @@ class _LyricViewState extends State<LyricView>
 
   // ── 圆点动画锚定 ──
   // 进入/切换间奏或 seek（时间回跳/大幅前跳）时，以当前时间重新锚定，
-  // 动画各阶段按「锚点 → 下一句开始」的剩余时长分配（对齐 AMLL）。
+  // 动画各阶段按「锚点 → 下一句开始」的剩余时长分配。
   int _dotsAnchorMs = 0;
   int? _lastDotsIndex;
   int _lastDotsDisplayMs = 0;
+
+  // ── seek 状态 ──
+  // 由当前时间与上次报告时间的差值推断（本播放器 positionStream 200ms 一报，
+  // 正常推进 dt≈200；回跳 / 大幅前跳 = seek）。seek 时引擎用固定稳定弹簧
+  // 参数 + 禁用级联延迟。
+  int _lastReportedTimeMs = 0;
+  bool _seekInProgress = false;
+
+  // ── 圆点 60fps 时钟 ──
+  // 位置流 200ms 一报，直接驱动圆点呼吸太粗；改用 ticker 逐帧推进
+  // [_dotsClockMs]，每次收到新位置就对表。暂停/
+  // 停止超过 [_kDotsPauseTimeout] 无新位置即冻结。
+  static const _kDotsPauseTimeout = Duration(milliseconds: 1200);
+  int _dotsClockMs = 0;
+  bool _dotsFrozen = true;
+  bool _dotsActive = false;
+  bool _dotsGotPosition = false;
+  Timer? _dotsPauseTimer;
 
   static const _kMinScrollHeight = 100.0;
   static const _kUserScrollHold = Duration(seconds: 3);
@@ -135,12 +158,12 @@ class _LyricViewState extends State<LyricView>
   static const _kMinimumOffset = 48.0;
 
   // ── 歌词景深（模糊 + 边缘淡出）──
-  // 模糊按"距当前行的行数"指数增长，与视口尺寸/字号无关（窄屏/宽屏表现
-  // 一致）：相邻行即有可见模糊，约 [_kBlurHalfRow] 行距达一半最大模糊，
-  // 远处趋近 [_kBlurMaxSigma]。视口顶/底用像素淡出（_edgeFadeOf）溶解，
-  // 配合外层硬裁剪保证不画到面板之外。
-  static const _kBlurMaxSigma = 2.0;
-  static const _kBlurHalfRow = 1.5;
+  // 模糊按"距当前行的行数"线性增长，上方行比下方多 +1 距离（已播区更糊）；
+  // 窄视口（≤1024）整体 ×0.8，整体强度 ×0.75。视口顶/底用像素淡出
+  // （_edgeFadeOf）溶解，配合外层硬裁剪保证不画到面板之外。
+  static const _kBlurNarrowWidth = 1024.0;
+  static const _kBlurNarrowScale = 0.8;
+  static const _kBlurIntensity = 0.75;
 
   // 视口边缘淡出长度：行目标顶边进入顶/底 [_kEdgeFadeLength] 后线性淡出到
   // 全透明。配合外层 ClipRect，保证歌词绝不会画到歌词面板之外
@@ -158,11 +181,10 @@ class _LyricViewState extends State<LyricView>
     super.initState();
     _engine = _createEngine();
     _ticker = createTicker(_onTick);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _needsJump = true;
-      _updateCurrent();
-    });
+    // 首帧直接 force 布局（引擎此时无视口，setCurrent 提前返回，真正的
+    // force 落在 build 里的同步 reposition），避免 mount 一帧叠影。
+    _needsJump = true;
+    _updateCurrent();
   }
 
   LyricEngine _createEngine() => LyricEngine(
@@ -188,6 +210,12 @@ class _LyricViewState extends State<LyricView>
       _dotsAnchorMs = 0;
       _lastDotsIndex = null;
       _lastDotsDisplayMs = 0;
+      _dotsClockMs = 0;
+      _dotsFrozen = true;
+      _dotsActive = false;
+      _dotsGotPosition = false;
+      _dotsPauseTimer?.cancel();
+      _dotsPauseTimer = null;
       _updateCurrent();
     } else {
       final metricsChanged =
@@ -208,6 +236,7 @@ class _LyricViewState extends State<LyricView>
         _lastDotsIndex = null;
       }
       if (old.currentTimeMs != widget.currentTimeMs) {
+        _dotsGotPosition = true;
         _updateCurrent();
       }
     }
@@ -226,9 +255,17 @@ class _LyricViewState extends State<LyricView>
       }
       return;
     }
+    final displayTimeMs = _effectiveTimeMs(widget.currentTimeMs);
+    final dt = displayTimeMs - _lastReportedTimeMs;
+    _lastReportedTimeMs = displayTimeMs;
+    // 向前大跳不算 seek（播放推进/快进均保留级联错落）；向后跳一定是
+    // 用户拖进度条 → seek。
+    // 前进方向的 seek（点击行 / 进度条）由 [_handleLineTap] 显式标记。
+    _seekInProgress = dt < -100;
+    _engine.isSeeking = _seekInProgress;
     final newIndex = LyricParser.findCurrentLineIndex(
       widget.lines,
-      _effectiveTimeMs(widget.currentTimeMs),
+      displayTimeMs,
     );
     if (newIndex != _currentIndex) {
       _currentIndex = newIndex;
@@ -251,6 +288,11 @@ class _LyricViewState extends State<LyricView>
     );
     if (targetIndex < 0) return;
     _currentIndex = targetIndex;
+    // 点击行视为 seek：本轮及后续落位用稳定弹簧参数，直到下一次正常推进。
+    _lastReportedTimeMs = _effectiveTimeMs(startTimeMs);
+    _seekInProgress = true;
+    _engine.isSeeking = true;
+    _dotsGotPosition = true;
     _engine.resumeFollow();
     _engine.setCurrent(targetIndex, force: false);
     _scheduleTicks();
@@ -259,7 +301,8 @@ class _LyricViewState extends State<LyricView>
   // ── 帧循环 ──
 
   void _scheduleTicks() {
-    if (!_engine.anyMoving) return;
+    final needDots = _dotsActive && !_dotsFrozen;
+    if (!_engine.anyMoving && !needDots) return;
     if (!_ticker.isActive) {
       _lastTickerElapsed = null;
       _ticker.start();
@@ -271,8 +314,21 @@ class _LyricViewState extends State<LyricView>
     _lastTickerElapsed = elapsed;
     final dtMs = last == null ? 0.0 : (elapsed - last).inMicroseconds / 1000.0;
     _engine.tick(dtMs);
+    if (_dotsActive && !_dotsFrozen) {
+      _dotsClockMs += dtMs.round();
+    }
     if (mounted) setState(() {});
-    if (!_engine.anyMoving) {
+    if (!_engine.anyMoving && !(_dotsActive && !_dotsFrozen)) {
+      _lastTickerElapsed = null;
+      _ticker.stop();
+    }
+  }
+
+  /// 暂停/停止超过超时无新位置 → 冻结圆点时钟。
+  void _onDotsPaused() {
+    _dotsPauseTimer = null;
+    _dotsFrozen = true;
+    if (mounted && !_engine.anyMoving && _ticker.isActive) {
       _lastTickerElapsed = null;
       _ticker.stop();
     }
@@ -496,13 +552,16 @@ class _LyricViewState extends State<LyricView>
 
   // ── 景深模糊 ──
 
-  /// 景深模糊 sigma：按"距当前行的行数"指数增长，与视口尺寸/字号无关
-  /// （窄屏/宽屏表现一致）。相邻行即有可见模糊，越远越糊、趋近
-  /// [_kBlurMaxSigma]；当前行恒 0。
-  double _blurSigmaFor(int index) {
-    final d = (index - _currentIndex).abs();
-    if (d == 0) return 0;
-    return _kBlurMaxSigma * (1 - math.exp(-d / _kBlurHalfRow));
+  /// 景深模糊 sigma：按"距当前行的行数"线性增长。上方行距离 +1（已播区比
+  /// 未播区更糊）；下方相邻行距离 1 → sigma 2×0.75=1.5；当前行恒 0。
+  double _blurSigmaFor(int index, double viewportWidth) {
+    if (index == _currentIndex) return 0;
+    final distance = index < _currentIndex
+        ? (_currentIndex - index) + 1
+        : (index - _currentIndex);
+    final level = 1 + distance;
+    final narrow = viewportWidth <= _kBlurNarrowWidth ? _kBlurNarrowScale : 1.0;
+    return level * narrow * _kBlurIntensity;
   }
 
 /// 视口边缘淡出：按行中心与视口顶/底的距离线性淡出到全透明（区间
@@ -593,6 +652,25 @@ class _LyricViewState extends State<LyricView>
           _lastDotsDisplayMs = displayTimeMs;
         }
 
+        // 圆点 60fps 时钟：收到新位置即对表 + 解冻并重设暂停超时；正常播放
+        // 期间 ticker 持续推进 [_dotsClockMs]，让呼吸动画平滑。
+        if (dotLineIndex != null) {
+          _dotsActive = true;
+          if (_dotsGotPosition) {
+            _dotsGotPosition = false;
+            _dotsFrozen = false;
+            _dotsClockMs = displayTimeMs;
+            _dotsPauseTimer?.cancel();
+            _dotsPauseTimer = Timer(_kDotsPauseTimeout, _onDotsPaused);
+            _scheduleTicks();
+          }
+        } else {
+          _dotsActive = false;
+          _dotsFrozen = true;
+          _dotsPauseTimer?.cancel();
+          _dotsPauseTimer = null;
+        }
+
         var ready = false;
         if (maxHeight >= _kMinScrollHeight) {
           final width = math.max(0.0, maxWidth - kLyricLeftBuffer - 48);
@@ -609,24 +687,22 @@ class _LyricViewState extends State<LyricView>
           }
         }
 
+        // 首帧/换歌/视口变化：同步 force 落位（引擎已具备视口与行高，直接
+        // 算目标；children 在本块之后构建，读取到的就是落位后的状态，避免
+        // mount 一帧叠影）。高度变化（如进入圆点槽）弹簧落到新位置。
         if ((_needsJump || _heightsChanged) &&
             !_pointerDown &&
             _userScrollHoldTimer == null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            if (_pointerDown || _userScrollHoldTimer != null) return;
-            final force = _needsJump;
-            _needsJump = false;
-            final heightsChanged = _heightsChanged;
-            _heightsChanged = false;
-            if (heightsChanged) {
-              _engine.reposition(force: force);
-            } else {
-              _engine.setCurrent(_currentIndex, force: force);
-            }
-            _scheduleTicks();
-            setState(() {});
-          });
+          final force = _needsJump;
+          _needsJump = false;
+          final heightsChanged = _heightsChanged;
+          _heightsChanged = false;
+          if (heightsChanged) {
+            _engine.reposition(force: force);
+          } else {
+            _engine.setCurrent(_currentIndex, force: force);
+          }
+          _scheduleTicks();
         }
 
         // 景深模糊：滑动/拖动/浏览抑制期间全部清晰（仅保留视口边缘淡出）。
@@ -645,7 +721,7 @@ class _LyricViewState extends State<LyricView>
                 dotLineIndex,
               ),
           if (ready && dotLineIndex != null)
-            _buildDots(dotLineIndex, displayTimeMs),
+            _buildDots(dotLineIndex),
         ];
 
         return Listener(
@@ -688,7 +764,7 @@ class _LyricViewState extends State<LyricView>
     if (layout == null) return const SizedBox.shrink();
 
     final dofEnabled = widget.lyricDepthBlur && !scrolling;
-    final blurSigma = dofEnabled ? _blurSigmaFor(i) : 0.0;
+    final blurSigma = dofEnabled ? _blurSigmaFor(i, maxWidth) : 0.0;
     final edgeFade = _edgeFadeOf(i);
     // 圆点槽在行盒内顶部：行盒保持引擎认为的位置（yOf..yOf+itemH），把
     // 歌词内容在盒内下推 28（4 顶部留白 + 16 圆点 + 8 底部留白），让圆点
@@ -719,6 +795,7 @@ class _LyricViewState extends State<LyricView>
             translationFontSize: widget.fontSize * 0.7,
             showTranslation: widget.showTranslation,
             lineLyricRevealMode: widget.lineLyricRevealMode,
+            wordFadeWidth: widget.wordFadeWidth,
             onTapLine: widget.onSeekLine == null
                 ? null
                 : () => _handleLineTap(line.startTimeMs),
@@ -739,7 +816,7 @@ class _LyricViewState extends State<LyricView>
   /// 不继承行的 DOF（景深模糊 / 非激活压暗 / 缩放），始终保持清晰醒目；
   /// 只随行一起做视口边缘淡出。位置 = 行内原圆点槽（顶部留白 4 + 左侧
   /// 24），由 [_engine.yOf] 驱动，与歌词行同位移动画同步。
-  Widget _buildDots(int i, int displayTimeMs) {
+  Widget _buildDots(int i) {
     final line = widget.lines[i];
     final end = i == 0 ? widget.lines[0].startTimeMs : line.startTimeMs;
     return Transform.translate(
@@ -749,7 +826,7 @@ class _LyricViewState extends State<LyricView>
         child: BreathingDots(
           anchorTimeMs: _dotsAnchorMs,
           endTimeMs: end,
-          currentTimeMs: displayTimeMs,
+          currentTimeMs: _dotsClockMs,
           color: widget.activeColor,
         ),
       ),
@@ -760,6 +837,7 @@ class _LyricViewState extends State<LyricView>
   void dispose() {
     _ticker.dispose();
     _userScrollHoldTimer?.cancel();
+    _dotsPauseTimer?.cancel();
     super.dispose();
   }
 }

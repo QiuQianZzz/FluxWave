@@ -2,7 +2,7 @@ import 'package:flutter/physics.dart';
 
 /// 歌词弹簧动画强度档位。
 ///
-/// 对标 Apple Music 风格歌词（AMLL）的位置/缩放双弹簧：不同档位对应不同
+/// 位置/缩放双弹簧：不同档位对应不同
 /// 的 [SpringDescription]（用 [SpringDescription.withDurationAndBounce] 描述
 /// 时长 + 回弹强度）。档位表达"回弹强度 + 总时长"，关闭开关后走回原有的
 /// 固定时长缓动（easeOutCubic）。
@@ -47,10 +47,8 @@ enum LyricSpringPreset {
 
 /// 歌词弹簧动画的共享描述。
 ///
-/// - 滚动：行切换时当前行滚到锚点，位置曲线带轻微过冲（对标 AMLL
-///   `linePosY` 弹簧）。
-/// - 行视觉：聚焦行放大、非聚焦行缩小 + 透明度，过冲体现在缩放上
-///   （对标 AMLL `lineScale` 弹簧）。
+/// - 滚动：行切换时当前行滚到锚点，位置曲线带轻微过冲。
+/// - 行视觉：聚焦行放大、非聚焦行缩小 + 透明度，过冲体现在缩放上。
 class LyricSpring {
   const LyricSpring._();
 

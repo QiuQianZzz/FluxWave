@@ -81,7 +81,7 @@ void main() {
       expect(prep.url, contains('interface.music.163.com'));
     });
 
-    test('UA 为 iPhone（对齐 SNext: eapi 默认 iPhone 伪装）', () {
+    test('UA 为 iPhone（eapi 默认 iPhone 伪装）', () {
       final ctx = NeteaseRequestContext(osKey: 'android');
       final prep = buildRequest(
         '/api/song/enhance/player/url/v1',

@@ -192,7 +192,7 @@ class NeteaseProvider extends ChangeNotifier {
   static const _anonRetryCooldown = Duration(hours: 6);
 
   /// 未登录且无 MUSIC_A 时，后台注册匿名态：
-  /// 让未登录场景的 eapi/weapi 请求也携带匿名 token，贴近参考项目"始终带 MUSIC_A"
+  /// 让未登录场景的 eapi/weapi 请求也携带匿名 token，始终带 MUSIC_A。
   /// 的行为，减少接口被拒 / 触发风控。成功由 registerAnon 内部落盘。
   ///
   /// 失败进入冷却（见 [saveAnonRetryAfter]），冷却期内不再重试，避免每启动重复打接口。

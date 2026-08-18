@@ -4,7 +4,7 @@ import '../../core/lyric/lyric_spring.dart';
 
 /// 弹簧物理参数（质量-弹簧-阻尼）。
 ///
-/// 与 AMLL `SpringParams` 对齐：`stiffness` 越大弹簧越硬越快，`damping` 越大
+/// `stiffness` 越大弹簧越硬越快，`damping` 越大
 /// 越"沉"越不容易回弹。临界阻尼 = 2·sqrt(stiffness·mass)；阻尼比 =
 /// damping / (2·sqrt(stiffness·mass))，>1 为过阻尼（无回弹）、<1 为欠阻尼
 /// （带回弹）。
@@ -20,11 +20,11 @@ class SpringParams {
   });
 }
 
-/// 带"延迟目标"的弹簧/缓动状态（移植自 AMLL core `utils/spring.ts`）。
+/// 带"延迟目标"的弹簧/缓动状态。
 ///
 /// 与 Flutter 的 [SpringSimulation] 不同：这里保留当前位置与速度，支持
 /// `setTarget(to, delayMs)` 延迟若干毫秒后再启动弹簧，且可动态改参
-/// （换句时按相邻行时间间隔重算 stiffness/damping）——这是 AMLL 每行
+/// （换句时按相邻行时间间隔重算 stiffness/damping）——每行
 /// 独立"placement spring"与级联错落的基础。
 ///
 /// - 弹簧模式：阻尼振荡解析解（过阻尼/临界/欠阻尼自动切换），[tick] 每帧
@@ -190,7 +190,7 @@ class SpringState {
             math.exp(-decay * t);
   }
 
-  /// 速度 = 解析解的中央差分（与 AMLL `derivative.ts` 相同）。
+  /// 速度 = 解析解的中央差分。
   static double _solveVelocity(
     double x0,
     double v0,
@@ -204,7 +204,7 @@ class SpringState {
   }
 }
 
-/// 按相邻两句歌词的时间间隔计算换行时的 posY 弹簧参数（AMLL
+/// 按相邻两句歌词的时间间隔计算换行时的 posY 弹簧参数：
 /// `computeLinePosYSpringParams`）：间隔越短弹簧越硬越快（stiffness 220），
 /// 间隔越长越软（stiffness 170）。damping = √stiffness × 档位系数。
 ///
@@ -226,7 +226,7 @@ SpringParams computeLinePosYSpringParams({
   return SpringParams(stiffness: stiffness, damping: damping);
 }
 
-/// 档位 → 阻尼系数（AMLL 基准 2.2，让"标准"档贴合 AMLL 手感；
+/// 档位 → 阻尼系数（基准 2.2，标准档贴合原生手感；
 /// bouncy 1.4 ≈ 阻尼比 0.74，欠阻尼可见回弹）。
 double _dampingFactor(LyricSpringPreset preset) => switch (preset) {
   LyricSpringPreset.soft => 2.8,

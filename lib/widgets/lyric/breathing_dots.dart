@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// 计算一帧圆点动画的参数（对齐 AMLL `interlude-dots.ts`）。
+/// 计算一帧圆点动画的参数。
 ///
 /// 动画锚定到 [anchorTimeMs]（进入间奏/seek 时以当前时间重新锚定），
 /// 各阶段按「锚点 → [endTimeMs] 的剩余时长」分配：

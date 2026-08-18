@@ -3,9 +3,9 @@ import 'dart:math' as math;
 import '../../core/lyric/lyric_spring.dart';
 import 'lyric_spring_state.dart';
 
-/// AMLL 式歌词布局/动画引擎。
+/// 歌词布局/动画引擎。
 ///
-/// 核心模型（对标 AMLL core `calcLayout` / SPlayer-Next physics 引擎）：
+/// 核心模型：
 /// - **当前行驱动列表对齐**：由 `scrollToIndex`（= 当前行，手动浏览时冻结为
 ///   `heldScrollIndex`）推导出每行目标 Y（顶边 = 视口对齐点 − 上方行高和）。
 /// - **每行自己的 placement spring**：每行独立的 [SpringState]（posY + scale）
@@ -35,6 +35,11 @@ class LyricEngine {
 
   /// 手动滚动偏移（px）：改变它会让所有行整体平移，拖动跟手用。
   double userScrollOffset = 0;
+
+  /// 是否处于 seek（点击行 / 进度条大跳）。seek 时用固定稳定弹簧参数并禁用
+  /// 级联延迟；正常推进
+  /// 恢复按相邻间隔的动态参数 + 错峰。
+  bool isSeeking = false;
 
   /// 当前行顶边应落在视口的比例（≈"第 3 句"锚点）。
   double alignFraction = 0.28;
@@ -94,6 +99,9 @@ class LyricEngine {
   double yOf(int i) => _posY[i].position;
   double scaleOf(int i) => _scale[i].position;
   double alphaOf(int i) => _alpha[i];
+
+  /// 第 i 行 posY 弹簧的当前参数（seek 用固定稳定参数，正常推进用动态参数）。
+  SpringParams posYSpringParamsOf(int i) => _posY[i].params;
 
   void setPreset(LyricSpringPreset p) {
     if (p == preset) return;
@@ -164,13 +172,24 @@ class LyricEngine {
     final anchor = scrollToIndex.clamp(0, n - 1);
 
     // 动态弹簧参数：按"当前行的上一句 → 当前句"间隔计算，广播给所有 posY。
-    final posParams = anchor <= 0
-        ? const SpringParams(stiffness: 90, damping: 15)
-        : computeLinePosYSpringParams(
-            prevStartMs: lineStartMs[anchor - 1],
-            curStartMs: lineStartMs[anchor],
-            preset: preset,
-          );
+    // seek 时用固定稳定参数。
+    final SpringParams posParams;
+    if (isSeeking) {
+      posParams = computeLinePosYSpringParams(
+        prevStartMs: 0,
+        curStartMs: 0,
+        preset: preset,
+        isSeek: true,
+      );
+    } else if (anchor <= 0) {
+      posParams = const SpringParams(stiffness: 90, damping: 15);
+    } else {
+      posParams = computeLinePosYSpringParams(
+        prevStartMs: lineStartMs[anchor - 1],
+        curStartMs: lineStartMs[anchor],
+        preset: preset,
+      );
+    }
     for (final s in _posY) {
       s.params = posParams;
     }
@@ -181,13 +200,14 @@ class LyricEngine {
     }
 
     // 级联延迟：进入视口的行每行 +50ms，过了对齐行后增量递减（÷1.05），
-    // 形成"近处先动、越远越慢且间距收窄"的波浪错落。
+    // 形成"近处先动、越远越慢且间距收窄"的波浪错落。seek 时禁用错峰，
+    // 所有行一起动。
     var delayMs = 0.0;
     var baseDelay = 50.0;
     for (var i = 0; i < n; i++) {
       final isActive = i == currentIndex;
       final scaleTarget = isActive ? 1.0 : 0.97;
-      final d = force ? 0.0 : delayMs;
+      final d = force || isSeeking ? 0.0 : delayMs;
       _posY[i].setTarget(y, d, force: force);
       _scale[i].setTarget(scaleTarget, d, force: force);
       if (force) {
@@ -195,7 +215,7 @@ class LyricEngine {
         _alphaMoving = false;
       }
       y += lineHeights[i];
-      if (i < n - 1 && !force && y >= 0) {
+      if (i < n - 1 && !force && !isSeeking && y >= 0) {
         delayMs += baseDelay;
         if (i >= anchor) baseDelay /= 1.05;
       }

@@ -17,7 +17,7 @@ import '../providers/settings_provider.dart';
 /// 用自定义 GLSL fragment shader（`shaders/fluid.frag`）渲染"伪流体"：
 /// fbm 噪声 + 域扭曲 + 地形重塑生成流动的等高线场，从当前歌曲封面的
 /// 主色板（[CoverColorExtractor.extractPalette]）查色，得到随封面变化的
-/// 连续渐变流体（网易云 RefinedNowPlaying 风格）。
+/// 连续渐变流体背景。
 ///
 /// - 切歌防抖取色（300ms），最多取 [kMaxColors] 个主色直接作为 uniform
 ///   float 数组传给 shader（不经过纹理采样，兼容 Impeller/mobile GPU）；

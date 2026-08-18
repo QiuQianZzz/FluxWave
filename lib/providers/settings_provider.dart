@@ -99,7 +99,7 @@ class SettingsProvider extends ChangeNotifier {
   /// 歌词景深模糊开关。默认开（部分人不喜欢该效果，可在设置页关闭）。
   bool _lyricDepthBlur = true;
 
-  /// 歌词弹簧动画开关。默认开（Apple Music 风格行切换 + 聚焦过冲）。
+  /// 歌词弹簧动画开关。默认开（行切换弹簧 + 聚焦过冲）。
   bool _lyricSpringEnabled = true;
 
   /// 歌词弹簧强度档位。默认标准（轻微过冲）。

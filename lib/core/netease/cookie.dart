@@ -1,4 +1,4 @@
-/// Netease Cookie 解析与拼装(S Player-Next cookie.ts 的 Dart 等价)。
+/// Netease Cookie 解析与拼装。
 /// - cookieToJson: 把长串 "k=v; k2=v2" 转成 Map。
 /// - cookieObjToString: 把 Map 转回字符串(对 key/value 做百分号编码)。
 Map<String, String> cookieToJson(String? cookie) {

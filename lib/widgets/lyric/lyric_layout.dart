@@ -49,7 +49,7 @@ class RowRenderData {
   final Rect layerBounds;
 
   /// 行级歌词（LRC，无逐字时间轴）：揭示按整行单一颜色线性扫过，
-  /// 而非逐音节推进（类似 AMLL 把 LRC 行折叠成"整行一个单词"的做法）。
+  /// 而非逐音节推进（把 LRC 行折叠成"整行一个单词"的做法）。
   final bool isLineLevel;
 
   const RowRenderData({

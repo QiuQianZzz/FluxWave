@@ -101,7 +101,90 @@ void main() {
     });
   });
 
-  group('动态弹簧参数（AMLL computeLinePosYSpringParams）', () {
+  group('seek 弹簧策略（isSeeking）', () {
+    test('isSeeking 时禁用级联延迟：所有行同一帧一起动（无等待行）', () {
+      final e = makeEngine()
+        ..setViewportHeight(600)
+        ..setAlignFraction(0.2)
+        ..setCurrent(6, force: true);
+      final before = List.generate(20, (i) => e.yOf(i));
+
+      e
+        ..isSeeking = true
+        ..setCurrent(3); // seek：所有行目标同步下移 3*40
+      e.tick(8);
+      var moved = 0;
+      for (var i = 0; i < 20; i++) {
+        if ((e.yOf(i) - before[i]).abs() > 0.01) moved++;
+      }
+      expect(moved, 20, reason: 'seek 禁用级联延迟，20 行全部同帧启动');
+
+      for (var i = 0; i < 500; i++) {
+        e.tick(16);
+      }
+      expect(e.anyMoving, isFalse);
+      for (var i = 0; i < 20; i++) {
+        expect(e.yOf(i), closeTo(0.2 * 600 + (i - 3) * 40, 1e-6), reason: '行 $i 收敛');
+      }
+    });
+
+    test('isSeeking 时使用固定稳定参数（90/15·标准档），不与动态参数混用', () {
+      final e = makeEngine()
+        ..setViewportHeight(600)
+        ..setAlignFraction(0.2)
+        ..setCurrent(6, force: true);
+      final before = e.posYSpringParamsOf(0);
+      e
+        ..isSeeking = true
+        ..setCurrent(3);
+      expect(
+        e.posYSpringParamsOf(0).stiffness,
+        90,
+        reason: 'seek 用固定稳定刚度',
+      );
+      expect(
+        e.posYSpringParamsOf(0).damping,
+        closeTo(15 * 2.2, 1e-9),
+        reason: '标准档 seek 阻尼',
+      );
+      expect(e.posYSpringParamsOf(0), isNot(before), reason: '与动态参数不同');
+    });
+
+    test('isSeeking 关闭后恢复正常推进：级联延迟恢复', () {
+      final e = makeEngine()
+        ..setViewportHeight(600)
+        ..setAlignFraction(0.2)
+        ..setCurrent(6, force: true);
+      final before = List.generate(20, (i) => e.yOf(i));
+
+      e
+        ..isSeeking = true
+        ..setCurrent(3);
+      e.tick(8);
+      final allMoved = List.generate(20, (i) => (e.yOf(i) - before[i]).abs());
+      expect(allMoved.where((v) => v > 0.01).length, 20, reason: '前置：seek 全部一起动');
+
+      // 恢复正常推进（下一次 setCurrent 走动态参数 + 级联延迟）。
+      e
+        ..isSeeking = false
+        ..setCurrent(4);
+      final mid = List.generate(20, (i) => e.yOf(i));
+      e.tick(8);
+      var moved = 0;
+      var waiting = 0;
+      for (var i = 0; i < 20; i++) {
+        if ((e.yOf(i) - mid[i]).abs() > 0.01) {
+          moved++;
+        } else {
+          waiting++;
+        }
+      }
+      expect(moved, greaterThan(0), reason: '恢复后近处行先动');
+      expect(waiting, greaterThan(0), reason: '级联延迟恢复，远处行仍在等待');
+    });
+  });
+
+  group('动态弹簧参数（computeLinePosYSpringParams）', () {
     test('间隔越短刚度越大：100ms 比 800ms 硬', () {
       final short = computeLinePosYSpringParams(
         prevStartMs: 0,
@@ -118,7 +201,7 @@ void main() {
       expect(long.stiffness, closeTo(170, 1e-6), reason: '最长间隔取下限刚度');
     });
 
-    test('标准档阻尼 = √stiffness × 2.2（贴合 AMLL 基准）', () {
+    test('标准档阻尼 = √stiffness × 2.2', () {
       final p = computeLinePosYSpringParams(
         prevStartMs: 0,
         curStartMs: 400,

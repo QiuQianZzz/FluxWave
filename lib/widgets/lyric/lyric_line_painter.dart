@@ -43,6 +43,9 @@ class LyricLinePainter extends CustomPainter {
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 恒走逐字动画不受影响。
   final LineLyricRevealMode lineLyricRevealMode;
 
+  /// 卡拉 OK 渐变淡出宽度（px）。
+  final double fadeWidthPx;
+
   const LyricLinePainter({
     required this.layout,
     required this.currentTimeMs,
@@ -50,6 +53,7 @@ class LyricLinePainter extends CustomPainter {
     required this.inactiveColor,
     required this.isFocused,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
+    this.fadeWidthPx = 10.0,
   });
 
   @override
@@ -275,7 +279,7 @@ class LyricLinePainter extends CustomPainter {
   Shader _createLineGradientShader(RowRenderData row, int currentTimeMs) {
     final activeColor = this.activeColor;
     final inactiveColor = activeColor.withValues(alpha: 0.2);
-    const minFadeWidth = 100.0;
+    final minFadeWidth = fadeWidthPx;
 
     final totalMinX = row.totalMinX;
     final totalMaxX = row.totalMaxX;
@@ -308,7 +312,7 @@ class LyricLinePainter extends CustomPainter {
     if (currentTimeMs >= row.lastSyllableEnd) return 1;
 
     // 行级歌词（LRC）：整行单一颜色线性揭示，不随音节几何/时间逐字推进，
-    // 对齐 AMLL「整行折叠为一个单词」的整行卡拉 OK。
+    // 整行折叠为一个单词的整行卡拉 OK。
     if (row.isLineLevel) {
       final dur = row.lastSyllableEnd - row.firstSyllableStart;
       return dur <= 0
@@ -353,6 +357,7 @@ class LyricLinePainter extends CustomPainter {
         oldDelegate.activeColor != activeColor ||
         oldDelegate.inactiveColor != inactiveColor ||
         oldDelegate.isFocused != isFocused ||
-        oldDelegate.lineLyricRevealMode != lineLyricRevealMode;
+        oldDelegate.lineLyricRevealMode != lineLyricRevealMode ||
+        oldDelegate.fadeWidthPx != fadeWidthPx;
   }
 }

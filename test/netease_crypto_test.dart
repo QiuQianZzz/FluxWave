@@ -146,7 +146,7 @@ void main() {
       'level': 'standard',
     }, NeteaseMode.eapi);
     expect(prep.url, contains('/eapi/song/url/v1'));
-    expect(prep.needDecrypt, isFalse); // 对齐 SNext ENCRYPT_RESPONSE=false
+    expect(prep.needDecrypt, isFalse); // ENCRYPT_RESPONSE=false
     expect(prep.body, startsWith('params='));
     final prepER = buildRequest(
       '/api/song/url/v1',
@@ -169,7 +169,7 @@ void main() {
       ..version = '1.0'
       ..publicKey = base64Encode(List.filled(32, 7))
       ..sk = 'abc';
-    // 按参考：AES-ECB(staticKey) 加密 JSON
+    // AES-ECB(staticKey) 加密 JSON
     final plain = utf8.encode(
       jsonEncode({
         'version': state.version,

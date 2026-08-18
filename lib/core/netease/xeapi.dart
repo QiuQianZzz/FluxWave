@@ -1,11 +1,11 @@
 /// xeapi 二期反爬：游客注册 / 部分接口。
-/// 忠实复刻 S Player-Next `core/crypto.ts` 的 xeapi 段(含 buildXeapiPlaintext)。
+/// xeapi 加密请求的 Dart 实现。
 /// 端点/UA 等见 `xeapiFetch.ts` / `request.ts`。
 ///
 /// 说明：
 /// - 依赖 config 的 [kXeapiStaticKey](AES-256-ECB) 与 [kXeapiSignKey](HMAC 签名)。
 /// - X25519 + AES-128-GCM 用 `cryptography` 纯 Dart 实现(Windows/Android 可用)。
-/// - 网易会更新协议；失效请对照参考 `crypto.ts`/`xeapi.ts` 核对。
+/// - 网易会更新协议；失效请对照源码核对。
 library;
 
 import 'dart:convert';

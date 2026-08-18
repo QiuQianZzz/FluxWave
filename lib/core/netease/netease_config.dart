@@ -7,7 +7,7 @@ library;
 class NeteaseConfig {
   /// 自动注入会话级国内 IP，默认关。
   ///
-  /// 参考共识：官方客户端直连从不携带 `X-Real-IP/X-Forwarded-For`（这两个头是
+  /// 共识：官方客户端直连从不携带 `X-Real-IP/X-Forwarded-For`（这两个头是
   /// 代理/CDN 加的），默认不注入最贴官方；Android 由 SettingsProvider 硬门控
   /// 恒为 false。显式 [NeteaseRequestContext.realIp] 始终优先（开发者/调试意图）。
   static bool enableRealIpInjection = false;

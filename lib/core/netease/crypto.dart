@@ -173,7 +173,7 @@ String _reverse(String s) => s.split('').reversed.join();
 /// ==== 各协议的加解密 ====
 
 /// weapi：双 AES-CBC + 裸 RSA 加密随机密钥。
-/// 注意：参考实现中，第 1 层输出的是 **base64 字符串**，第 2 层再加密该 base64
+/// 注意：第 1 层输出的是 **base64 字符串**，第 2 层再加密该 base64
 /// 串的 UTF-8 字节（不是加密第 1 层的原始密文）。`params` base64 编码后即 CU 层密文。
 Map<String, String> weapi(Map<String, Object> data) {
   final secretKey = randomBase62(16); // 16 字符
@@ -182,7 +182,7 @@ Map<String, String> weapi(Map<String, Object> data) {
     utf8.encode(kPresetKey),
     iv: utf8.encode(kIv),
   );
-  final firstB64 = base64Encode(enc1); // 参考 aesEncrypt 默认输出 base64
+  final firstB64 = base64Encode(enc1); // aesEncrypt 默认输出 base64
   final params = aesCbcEncrypt(
     utf8.encode(firstB64),
     utf8.encode(secretKey),

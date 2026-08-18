@@ -114,7 +114,7 @@ void main() {
     );
   });
 
-  test('过滤「私人雷达」类推荐歌单（对齐 SNext）', () async {
+  test('过滤「私人雷达」类推荐歌单', () async {
     final client = FakeHomeClient()
       ..response = {
         'code': 200,

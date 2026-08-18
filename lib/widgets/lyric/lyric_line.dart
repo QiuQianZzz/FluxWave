@@ -39,6 +39,10 @@ class LyricLineView extends StatelessWidget {
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 不受影响。
   final LineLyricRevealMode lineLyricRevealMode;
 
+  /// 卡拉 OK 渐变的淡出宽度，相对 [fontSize] 的比例。
+  /// 实际渐变长度 = `wordFadeWidth × fontSize`。
+  final double wordFadeWidth;
+
   const LyricLineView({
     super.key,
     required this.line,
@@ -53,6 +57,7 @@ class LyricLineView extends StatelessWidget {
     this.onLongPressLine,
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
+    this.wordFadeWidth = 0.5,
   });
 
   @override
@@ -85,6 +90,7 @@ class LyricLineView extends StatelessWidget {
               inactiveColor: inactiveColor,
               isFocused: isActive,
               lineLyricRevealMode: lineLyricRevealMode,
+              fadeWidthPx: wordFadeWidth * fontSize,
             ),
           ),
         ),
