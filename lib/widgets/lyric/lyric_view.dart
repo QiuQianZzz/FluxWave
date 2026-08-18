@@ -665,9 +665,10 @@ class _LyricViewState extends State<LyricView>
     final dofEnabled = widget.lyricDepthBlur && !scrolling;
     final blurSigma = dofEnabled ? _blurSigmaFor(i) : 0.0;
     final edgeFade = _edgeFadeOf(i);
-    // 圆点槽在行内顶部：把歌词内容下推 28（4 顶部留白 + 16 圆点 + 8 底部
-    // 留白），让圆点浮在文字上方而不是叠在文字上。行盒高度已含 +28，
-    // 下推只是把内容挪到盒内底部。
+    // 圆点槽在行盒内顶部：行盒保持引擎认为的位置（yOf..yOf+itemH），把
+    // 歌词内容在盒内下推 28（4 顶部留白 + 16 圆点 + 8 底部留白），让圆点
+    // 浮在文字上方而不叠字。下推放在 SizedBox 内侧，避免把整个行盒往下
+    // 推 28 导致悬停盒变高、盒底多出空白。
     final dotsSlotTop = i == dotLineIndex ? 28.0 : 0.0;
 
     return LyricLineVisual(
@@ -676,11 +677,13 @@ class _LyricViewState extends State<LyricView>
       alpha: _engine.alphaOf(i) * edgeFade,
       blurSigma: blurSigma,
       child: Padding(
-        padding: EdgeInsets.only(left: kLyricLeftBuffer, top: dotsSlotTop),
+        padding: const EdgeInsets.only(left: kLyricLeftBuffer),
         child: SizedBox(
           width: maxWidth - kLyricLeftBuffer,
           height: _itemHeights[i],
-          child: LyricLineView(
+          child: Padding(
+            padding: EdgeInsets.only(top: dotsSlotTop),
+            child: LyricLineView(
             line: line,
             layout: layout,
             isActive: isActive,
@@ -699,6 +702,7 @@ class _LyricViewState extends State<LyricView>
                       ? null
                       : () => widget.onSeekLine!(line.startTimeMs))
                 : () => widget.onLyricLongPress!(line.startTimeMs),
+          ),
           ),
         ),
       ),
