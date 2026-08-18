@@ -116,6 +116,14 @@ class LyricEngine {
     _recomputeTargets(force: force);
   }
 
+  /// 布局数据（行高/视口/对齐点）变化后重算目标。
+  ///
+  /// 不同于 [setCurrent]：不因"索引未变"提前返回。圆点出现/消失、宽度变化
+  /// 会改行高，索引不变但所有行目标都该用新行高重算。
+  void reposition({bool force = false}) {
+    _recomputeTargets(force: force);
+  }
+
   /// 手动拖动：跟手（直接落位，不弹）。
   void setUserScrollOffset(double v, {bool force = true}) {
     userScrollOffset = v;

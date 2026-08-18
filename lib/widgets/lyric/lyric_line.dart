@@ -39,9 +39,6 @@ class LyricLineView extends StatelessWidget {
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 不受影响。
   final LineLyricRevealMode lineLyricRevealMode;
 
-  /// 前奏/间奏呼吸圆点（null = 不显示）。
-  final Widget? leadingDots;
-
   const LyricLineView({
     super.key,
     required this.line,
@@ -56,7 +53,6 @@ class LyricLineView extends StatelessWidget {
     this.onLongPressLine,
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
-    this.leadingDots,
   });
 
   @override
@@ -76,8 +72,6 @@ class LyricLineView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (leadingDots != null)
-          Padding(padding: const EdgeInsets.only(top: 4), child: leadingDots!),
         // 画布文字对读屏不可见，用 Semantics 补回整行歌词。
         Semantics(
           label: line.text,
@@ -157,22 +151,28 @@ class LyricLineVisual extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visual = Transform.translate(
-      offset: Offset(0, translateY),
-      child: Transform.scale(
-        scale: scale,
-        // TransformOrigin(0, 1)（LTR 左下角）：放大时左边缘保持不动，
-        // 避免聚焦行左溢出可视区。
-        alignment: Alignment.bottomLeft,
-        child: Opacity(opacity: alpha.clamp(0.0, 1.0), child: child),
-      ),
+    // 视觉变换放最外层：Translate 在外（行偏移），向内是缩放/透明度/模糊。
+    // 若把 Translate 包在 ImageFiltered 内侧，ImageFiltered 的盒子会平铺在
+    // Stack 原点 (0,0)，其 RenderBox.hitTest 用 size.contains 判断命中，行
+    // 偏移后位于盒子下缘之外的点击（如点击非当前行 seek）会被整段吞掉。
+    final visual = Transform.scale(
+      scale: scale,
+      // TransformOrigin(0, 1)（LTR 左下角）：放大时左边缘保持不动，
+      // 避免聚焦行左溢出可视区。
+      alignment: Alignment.bottomLeft,
+      child: Opacity(opacity: alpha.clamp(0.0, 1.0), child: child),
     );
-    if (blurSigma > 0.05) {
-      return ImageFiltered(
-        imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-        child: visual,
-      );
-    }
-    return visual;
+    return Transform.translate(
+      offset: Offset(0, translateY),
+      child: blurSigma > 0.05
+          ? ImageFiltered(
+              imageFilter: ImageFilter.blur(
+                sigmaX: blurSigma,
+                sigmaY: blurSigma,
+              ),
+              child: visual,
+            )
+          : visual,
+    );
   }
 }

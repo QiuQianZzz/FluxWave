@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fluxwave/core/lyric/line_lyric_reveal_mode.dart';
 import 'package:fluxwave/core/lyric/lyric_model.dart';
+import 'package:fluxwave/widgets/lyric/breathing_dots.dart';
 import 'package:fluxwave/widgets/lyric/lyric_line.dart';
 import 'package:fluxwave/widgets/lyric/lyric_line_painter.dart';
 import 'package:fluxwave/widgets/lyric/lyric_view.dart';
@@ -20,6 +21,23 @@ List<LyricLine> buildLines() => List.generate(
 
 Widget wrap(List<LyricLine> lines, int currentTimeMs) =>
     wrapWithHeight(lines, currentTimeMs, 600);
+
+/// 某行歌词内容在其行盒内的顶部内边距（圆点行应为 28，其余为 0）。
+double topPadOf(WidgetTester tester, String text) {
+  final padding = tester
+      .widget<Padding>(
+        find
+            .ancestor(
+              of: find.byWidgetPredicate(
+                (w) => w is LyricLineView && w.line.text == text,
+              ),
+              matching: find.byType(Padding),
+            )
+            .first,
+      )
+      .padding;
+  return (padding as EdgeInsets).top;
+}
 
 Widget wrapWithHeight(
   List<LyricLine> lines,
@@ -554,5 +572,197 @@ void main() {
     }
     await gesture.up();
     await tester.pumpAndSettle();
+  });
+
+  /// 构造带 6s 间奏（line 0 → line 1 间隔 >5s）的歌词。
+  List<LyricLine> linesWithInterlude() => [
+    LyricLine(text: 'line 0', startTimeMs: 0, endTimeMs: 2000),
+    LyricLine(text: 'line 1', startTimeMs: 8000, endTimeMs: 10000),
+    for (var i = 2; i < 8; i++)
+      LyricLine(
+        text: 'line $i',
+        startTimeMs: 10000 + i * 1000,
+        endTimeMs: 10000 + (i + 1) * 1000,
+      ),
+  ];
+
+  testWidgets('间奏圆点出现：圆点行 +28 高度，后续行随之下移（回归）', (tester) async {
+    final lines = linesWithInterlude();
+    await tester.pumpWidget(wrap(lines, 1000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 进入间奏（圆点挂到 line 1）。
+    await tester.pumpWidget(wrap(lines, 4000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final t0 = visualOf(tester, 0).translateY;
+    final t1 = visualOf(tester, 1).translateY;
+    final t2 = visualOf(tester, 2).translateY;
+    expect(t1 - t0, 46, reason: '无圆点的 line 0 高度不变');
+    expect(t2 - t1, 74, reason: '圆点行（line 1）高度 +28，line 2 必须随之下移');
+  });
+
+  testWidgets('间奏圆点消失：圆点行高度回缩，后续行上移（回归）', (tester) async {
+    final lines = linesWithInterlude();
+    await tester.pumpWidget(wrap(lines, 4000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 间奏结束（line 1 开唱，圆点消失）。
+    await tester.pumpWidget(wrap(lines, 9000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    final t1 = visualOf(tester, 1).translateY;
+    final t2 = visualOf(tester, 2).translateY;
+    expect(t2 - t1, 46, reason: '圆点消失后 line 1 高度回缩 28，line 2 上移');
+  });
+
+  testWidgets('呼吸圆点不继承 DOF：独立渲染、清晰醒目，歌词文本仍被模糊压暗', (tester) async {
+    final lines = linesWithInterlude();
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 4000, true));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 圆点渲染为独立节点，不得嵌套在行视觉内（否则会继承模糊/压暗/缩放）。
+    expect(find.byType(BreathingDots), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.byType(BreathingDots),
+        matching: find.byType(LyricLineVisual),
+      ),
+      findsNothing,
+      reason: '圆点不得嵌套在 LyricLineVisual 内',
+    );
+
+    // 圆点位置 = 圆点行顶 +4（随行动画同步）。
+    final t1 = visualOf(tester, 1).translateY;
+    final dotsTranslate = tester.widget<Transform>(
+      find
+          .ancestor(
+            of: find.byType(BreathingDots),
+            matching: find.byType(Transform),
+          )
+          .first,
+    );
+    expect(
+      (dotsTranslate.transform.getTranslation().y - (t1 + 4)).abs(),
+      lessThan(0.001),
+    );
+
+    // 圆点行 line 1 处于间奏、非当前行、景深开启（未拖动）→ 必有模糊。
+    final visual1 = visualOf(tester, 1);
+    expect(visual1.blurSigma, greaterThan(0), reason: '圆点行歌词文本仍应有景深模糊');
+    expect(visual1.alpha, lessThan(1.0), reason: '圆点行歌词文本仍应被非激活压暗');
+
+    // 圆点行歌词内容下推 28（圆点槽在行顶），不得与圆点重叠（回归：
+    // 第一行没有被推下去——圆点叠在文字上）。
+    expect(topPadOf(tester, 'line 1'), 28, reason: '圆点行文字必须下推 28（圆点浮于文字上方）');
+    expect(topPadOf(tester, 'line 0'), 0, reason: '无圆点的行不需要下推');
+  });
+
+  testWidgets('点击被景深模糊的非当前行：仍能触发 seek（修 ImageFiltered 吞点击）', (tester) async {
+    final lines = linesWithInterlude();
+    var seeked = -1;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 300,
+            height: 600,
+            child: LyricView(
+              lines: lines,
+              currentTimeMs: 4000,
+              activeColor: Colors.white,
+              inactiveColor: Colors.black54,
+              onSeekLine: (ms) => seeked = ms,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // 圆点行 line 1 处于间奏、非当前行、景深开启（未拖动）→ 必有模糊。
+    expect(visualOf(tester, 1).blurSigma, greaterThan(0), reason: '前置：line 1 被模糊');
+
+    final inks = find.descendant(
+      of: find.byType(LyricView),
+      matching: find.byType(InkWell),
+    );
+    await tester.tap(inks.at(1));
+    await tester.pump();
+    expect(seeked, 8000, reason: '点击被模糊的非当前行必须能 seek');
+  });
+
+  testWidgets('进度条拖进前奏 / 拖到首行：前奏圆点出现与消失，行高正确（回归）', (tester) async {
+    final lines = [
+      LyricLine(text: 'line 0', startTimeMs: 8000, endTimeMs: 9000),
+      for (var i = 1; i < 8; i++)
+        LyricLine(
+          text: 'line $i',
+          startTimeMs: 8000 + i * 2000,
+          endTimeMs: 8000 + (i + 1) * 2000,
+        ),
+    ];
+
+    await tester.pumpWidget(wrap(lines, 3000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsOneWidget, reason: '前奏中应有圆点');
+    final t0 = visualOf(tester, 0).translateY;
+    final t1 = visualOf(tester, 1).translateY;
+    expect(t1 - t0, 74, reason: '前奏圆点行 line 0 +28，line 1 随之下移');
+    expect(topPadOf(tester, 'line 0'), 28, reason: '前奏圆点行文字下推 28，圆点浮于上方');
+
+    await tester.pumpWidget(wrap(lines, 8000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsNothing, reason: '首行开始后圆点消失');
+    expect(visualOf(tester, 1).translateY - visualOf(tester, 0).translateY, 46, reason: 'line 0 高度回缩');
+  });
+
+  testWidgets('拖到远处再拖回前奏：圆点行 +28 高度恢复（回归：二次进入前奏行高错位）', (tester) async {
+    final lines = [
+      LyricLine(text: 'line 0', startTimeMs: 8000, endTimeMs: 9000),
+      for (var i = 1; i < 8; i++)
+        LyricLine(
+          text: 'line $i',
+          startTimeMs: 8000 + i * 2000,
+          endTimeMs: 8000 + (i + 1) * 2000,
+        ),
+    ];
+
+    // ① 初始进入前奏：圆点正确，line 1 下移。
+    await tester.pumpWidget(wrap(lines, 1000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsOneWidget);
+    expect(
+      visualOf(tester, 1).translateY - visualOf(tester, 0).translateY,
+      74,
+      reason: '① 初始前奏：line 0 +28，line 1 下移',
+    );
+
+    // ② 拖到远处（line 4）：前奏圆点消失。
+    await tester.pumpWidget(wrap(lines, 16000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsNothing);
+
+    // ③ 再拖回前奏：圆点必须恢复，line 1 重新下移 28（回归：曾与修复前一样贴太近）。
+    await tester.pumpWidget(wrap(lines, 0));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsOneWidget, reason: '③ 拖回后圆点恢复');
+    expect(
+      visualOf(tester, 1).translateY - visualOf(tester, 0).translateY,
+      74,
+      reason: '③ 二次进入前奏：line 0 高度必须重新 +28，line 1 随之下移',
+    );
+    expect(topPadOf(tester, 'line 0'), 28, reason: '③ 二次进入前奏：line 0 文字下推 28，圆点不叠字');
   });
 }

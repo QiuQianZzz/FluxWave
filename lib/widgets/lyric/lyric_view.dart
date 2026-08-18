@@ -592,8 +592,13 @@ class _LyricViewState extends State<LyricView>
             if (_pointerDown || _userScrollHoldTimer != null) return;
             final force = _needsJump;
             _needsJump = false;
+            final heightsChanged = _heightsChanged;
             _heightsChanged = false;
-            _engine.setCurrent(_currentIndex, force: force);
+            if (heightsChanged) {
+              _engine.reposition(force: force);
+            } else {
+              _engine.setCurrent(_currentIndex, force: force);
+            }
             _scheduleTicks();
             setState(() {});
           });
@@ -611,10 +616,11 @@ class _LyricViewState extends State<LyricView>
                 i,
                 maxWidth,
                 displayTimeMs,
-                introDots,
-                interludeIndex,
                 scrolling,
+                dotLineIndex,
               ),
+          if (ready && dotLineIndex != null)
+            _buildDots(dotLineIndex, displayTimeMs),
         ];
 
         return Listener(
@@ -648,9 +654,8 @@ class _LyricViewState extends State<LyricView>
     int i,
     double maxWidth,
     int displayTimeMs,
-    bool introDots,
-    int? interludeIndex,
     bool scrolling,
+    int? dotLineIndex,
   ) {
     final line = widget.lines[i];
     final isActive = i == _currentIndex;
@@ -660,25 +665,10 @@ class _LyricViewState extends State<LyricView>
     final dofEnabled = widget.lyricDepthBlur && !scrolling;
     final blurSigma = dofEnabled ? _blurSigmaFor(i) : 0.0;
     final edgeFade = _edgeFadeOf(i);
-    final showDots = (introDots && i == 0) || i == interludeIndex;
-
-    Widget leadingDots = const SizedBox.shrink();
-    if (showDots) {
-      final start = i == 0 ? 0 : widget.lines[i - 1].endTimeMs;
-      final end = i == 0 ? widget.lines[0].startTimeMs : line.startTimeMs;
-      leadingDots = Padding(
-        padding: const EdgeInsets.only(bottom: 8, left: 24),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: BreathingDots(
-            startTimeMs: start,
-            endTimeMs: end,
-            currentTimeMs: displayTimeMs,
-            color: widget.activeColor,
-          ),
-        ),
-      );
-    }
+    // 圆点槽在行内顶部：把歌词内容下推 28（4 顶部留白 + 16 圆点 + 8 底部
+    // 留白），让圆点浮在文字上方而不是叠在文字上。行盒高度已含 +28，
+    // 下推只是把内容挪到盒内底部。
+    final dotsSlotTop = i == dotLineIndex ? 28.0 : 0.0;
 
     return LyricLineVisual(
       translateY: _engine.yOf(i),
@@ -686,7 +676,7 @@ class _LyricViewState extends State<LyricView>
       alpha: _engine.alphaOf(i) * edgeFade,
       blurSigma: blurSigma,
       child: Padding(
-        padding: const EdgeInsets.only(left: kLyricLeftBuffer),
+        padding: EdgeInsets.only(left: kLyricLeftBuffer, top: dotsSlotTop),
         child: SizedBox(
           width: maxWidth - kLyricLeftBuffer,
           height: _itemHeights[i],
@@ -701,7 +691,6 @@ class _LyricViewState extends State<LyricView>
             translationFontSize: widget.fontSize * 0.7,
             showTranslation: widget.showTranslation,
             lineLyricRevealMode: widget.lineLyricRevealMode,
-            leadingDots: showDots ? leadingDots : null,
             onTapLine: widget.onSeekLine == null
                 ? null
                 : () => _handleLineTap(line.startTimeMs),
@@ -711,6 +700,29 @@ class _LyricViewState extends State<LyricView>
                       : () => widget.onSeekLine!(line.startTimeMs))
                 : () => widget.onLyricLongPress!(line.startTimeMs),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 前奏/间奏呼吸圆点：独立于行内歌词渲染，走自己的变换。
+  ///
+  /// 不继承行的 DOF（景深模糊 / 非激活压暗 / 缩放），始终保持清晰醒目；
+  /// 只随行一起做视口边缘淡出。位置 = 行内原圆点槽（顶部留白 4 + 左侧
+  /// 24），由 [_engine.yOf] 驱动，与歌词行同位移动画同步。
+  Widget _buildDots(int i, int displayTimeMs) {
+    final line = widget.lines[i];
+    final start = i == 0 ? 0 : widget.lines[i - 1].endTimeMs;
+    final end = i == 0 ? widget.lines[0].startTimeMs : line.startTimeMs;
+    return Transform.translate(
+      offset: Offset(kLyricLeftBuffer + 24, _engine.yOf(i) + 4),
+      child: Opacity(
+        opacity: _edgeFadeOf(i).clamp(0.0, 1.0),
+        child: BreathingDots(
+          startTimeMs: start,
+          endTimeMs: end,
+          currentTimeMs: displayTimeMs,
+          color: widget.activeColor,
         ),
       ),
     );
