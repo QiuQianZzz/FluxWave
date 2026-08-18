@@ -765,4 +765,46 @@ void main() {
     );
     expect(topPadOf(tester, 'line 0'), 28, reason: '③ 二次进入前奏：line 0 文字下推 28，圆点不叠字');
   });
+
+  testWidgets('圆点动画锚定：进入/seek 重锚定，正常播放推进不重锚（对齐 AMLL）', (tester) async {
+    final lines = [
+      LyricLine(text: 'line 0', startTimeMs: 8000, endTimeMs: 9000),
+      for (var i = 1; i < 8; i++)
+        LyricLine(
+          text: 'line $i',
+          startTimeMs: 8000 + i * 2000,
+          endTimeMs: 8000 + (i + 1) * 2000,
+        ),
+    ];
+
+    int anchor() =>
+        tester.widget<BreathingDots>(find.byType(BreathingDots)).anchorTimeMs;
+
+    // ① 初始进入前奏：锚定 = 进入时的时间。
+    await tester.pumpWidget(wrap(lines, 0));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byType(BreathingDots), findsOneWidget);
+    expect(anchor(), 0, reason: '初始锚定 = 进入间奏时的时间');
+
+    // ② 正常播放推进（~200ms 一报）：不重新锚定。
+    for (var t = 200; t <= 2000; t += 200) {
+      await tester.pumpWidget(wrap(lines, t));
+      await tester.pump();
+      await tester.pumpAndSettle();
+    }
+    expect(anchor(), 0, reason: '正常播放推进不应重锚');
+
+    // ③ seek 回跳：重新锚定到当前时间。
+    await tester.pumpWidget(wrap(lines, 500));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(anchor(), 500, reason: 'seek 回跳应重新锚定');
+
+    // ④ 大幅前跳（seek 前进）：重新锚定。
+    await tester.pumpWidget(wrap(lines, 6000));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(anchor(), 6000, reason: '大幅前跳应重新锚定');
+  });
 }

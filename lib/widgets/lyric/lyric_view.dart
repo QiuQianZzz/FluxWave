@@ -113,6 +113,13 @@ class _LyricViewState extends State<LyricView>
   List<double> _baseHeights = [];
   List<double> _itemHeights = [];
 
+  // ── 圆点动画锚定 ──
+  // 进入/切换间奏或 seek（时间回跳/大幅前跳）时，以当前时间重新锚定，
+  // 动画各阶段按「锚点 → 下一句开始」的剩余时长分配（对齐 AMLL）。
+  int _dotsAnchorMs = 0;
+  int? _lastDotsIndex;
+  int _lastDotsDisplayMs = 0;
+
   static const _kMinScrollHeight = 100.0;
   static const _kUserScrollHold = Duration(seconds: 3);
 
@@ -178,6 +185,9 @@ class _LyricViewState extends State<LyricView>
       _itemHeights = [];
       _measuredWidth = double.infinity;
       _measuredDotsLine = null;
+      _dotsAnchorMs = 0;
+      _lastDotsIndex = null;
+      _lastDotsDisplayMs = 0;
       _updateCurrent();
     } else {
       final metricsChanged =
@@ -195,6 +205,7 @@ class _LyricViewState extends State<LyricView>
         // 弹簧/缓动模式是引擎内部状态，切换需重建引擎并重新落位。
         _engine = _createEngine();
         _needsJump = true;
+        _lastDotsIndex = null;
       }
       if (old.currentTimeMs != widget.currentTimeMs) {
         _updateCurrent();
@@ -568,6 +579,20 @@ class _LyricViewState extends State<LyricView>
         final interludeIndex = _interludeIndex(displayTimeMs);
         final dotLineIndex = introDots ? 0 : interludeIndex;
 
+        // 圆点动画锚定：进入/切换间奏或 seek 时以当前时间重新锚定，让各
+        // 阶段按剩余时长分配。正常播放推进（~200ms 一报）不触发。
+        if (dotLineIndex != _lastDotsIndex) {
+          _lastDotsIndex = dotLineIndex;
+          _dotsAnchorMs = displayTimeMs;
+          _lastDotsDisplayMs = displayTimeMs;
+        } else if (dotLineIndex != null) {
+          final dt = displayTimeMs - _lastDotsDisplayMs;
+          if (dt < -100 || dt > 1500) {
+            _dotsAnchorMs = displayTimeMs;
+          }
+          _lastDotsDisplayMs = displayTimeMs;
+        }
+
         var ready = false;
         if (maxHeight >= _kMinScrollHeight) {
           final width = math.max(0.0, maxWidth - kLyricLeftBuffer - 48);
@@ -716,14 +741,13 @@ class _LyricViewState extends State<LyricView>
   /// 24），由 [_engine.yOf] 驱动，与歌词行同位移动画同步。
   Widget _buildDots(int i, int displayTimeMs) {
     final line = widget.lines[i];
-    final start = i == 0 ? 0 : widget.lines[i - 1].endTimeMs;
     final end = i == 0 ? widget.lines[0].startTimeMs : line.startTimeMs;
     return Transform.translate(
       offset: Offset(kLyricLeftBuffer + 24, _engine.yOf(i) + 4),
       child: Opacity(
         opacity: _edgeFadeOf(i).clamp(0.0, 1.0),
         child: BreathingDots(
-          startTimeMs: start,
+          anchorTimeMs: _dotsAnchorMs,
           endTimeMs: end,
           currentTimeMs: displayTimeMs,
           color: widget.activeColor,
