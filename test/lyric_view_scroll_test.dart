@@ -61,7 +61,7 @@ Widget wrapWithHeight(
 Widget wrapWithLyricBlur(
   List<LyricLine> lines,
   int currentTimeMs,
-  bool depthBlur,
+  int depthBlurAmount,
 ) => MaterialApp(
   home: Scaffold(
     body: SizedBox(
@@ -72,33 +72,31 @@ Widget wrapWithLyricBlur(
         currentTimeMs: currentTimeMs,
         activeColor: Colors.white,
         inactiveColor: Colors.black54,
-        lyricDepthBlur: depthBlur,
+        lyricDepthBlurAmount: depthBlurAmount,
       ),
     ),
   ),
 );
 
 /// 激活行的 LyricLineVisual（外层包装）。
-LyricLineVisual activeVisual(WidgetTester tester) => tester.widget<
-  LyricLineVisual
->(
-  find.ancestor(
-    of: find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
-    matching: find.byType(LyricLineVisual),
-  ),
-);
+LyricLineVisual activeVisual(WidgetTester tester) =>
+    tester.widget<LyricLineVisual>(
+      find.ancestor(
+        of: find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
+        matching: find.byType(LyricLineVisual),
+      ),
+    );
 
 /// 第 [index] 行的 LyricLineVisual。
-LyricLineVisual visualOf(WidgetTester tester, int index) => tester.widget<
-  LyricLineVisual
->(
-  find.ancestor(
-    of: find.byWidgetPredicate(
-      (w) => w is LyricLineView && w.line.text == 'line $index',
-    ),
-    matching: find.byType(LyricLineVisual),
-  ),
-);
+LyricLineVisual visualOf(WidgetTester tester, int index) =>
+    tester.widget<LyricLineVisual>(
+      find.ancestor(
+        of: find.byWidgetPredicate(
+          (w) => w is LyricLineView && w.line.text == 'line $index',
+        ),
+        matching: find.byType(LyricLineVisual),
+      ),
+    );
 
 /// 激活行的行文本（判断高亮/跟随是否切换到了目标句）。
 String activeLineText(WidgetTester tester) {
@@ -160,8 +158,16 @@ void main() {
     await tester.pumpWidget(wrap(lines, 6 * 2000));
     await tester.pumpAndSettle();
     expect(activeLineText(tester), 'line 6', reason: '高亮应切到第 6 行');
-    expect(activeVisual(tester).translateY, closeTo(initial, 0.001), reason: '锚点行顶边不变');
-    expect(visualOf(tester, 0).translateY, lessThan(0), reason: '第 0 行应被顶出可视区上方');
+    expect(
+      activeVisual(tester).translateY,
+      closeTo(initial, 0.001),
+      reason: '锚点行顶边不变',
+    );
+    expect(
+      visualOf(tester, 0).translateY,
+      lessThan(0),
+      reason: '第 0 行应被顶出可视区上方',
+    );
   });
 
   testWidgets('鼠标滚轮：离开歌词区即时解除抑制（无需等 3 秒）', (tester) async {
@@ -352,7 +358,11 @@ void main() {
 
     expect(seeked, 2000, reason: '点击应触发第 1 行 seek');
     expect(activeLineText(tester), 'line 1', reason: '点击后高亮应切到目标行');
-    expect(activeVisual(tester).translateY, closeTo(before, 0.001), reason: '点击后应回锚点');
+    expect(
+      activeVisual(tester).translateY,
+      closeTo(before, 0.001),
+      reason: '点击后应回锚点',
+    );
   });
 
   testWidgets('只轻点（没有任何拖动痕迹）：不误开窗口，换句照常跟随', (tester) async {
@@ -453,7 +463,7 @@ void main() {
 
   testWidgets('景深模糊梯度：当前行不模糊，相邻行即有可见模糊且随距离递增', (tester) async {
     final lines = buildLines();
-    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, 75));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -467,11 +477,7 @@ void main() {
     expect(blurOf(4), greaterThan(0.8), reason: '当前行下一句应有可见模糊');
     expect(blurOf(4), lessThan(blurOf(6)), reason: '下方模糊应随距离递增');
     expect(blurOf(6), lessThan(blurOf(8)), reason: '下方模糊应随距离递增');
-    expect(
-      blurOf(8),
-      lessThan(blurOf(visuals.length - 1)),
-      reason: '远处行最模糊',
-    );
+    expect(blurOf(8), lessThan(blurOf(visuals.length - 1)), reason: '远处行最模糊');
     // 上方同样递增，且已播区顶部更模糊。
     expect(blurOf(2), greaterThan(0.8), reason: '当前行上一句也应有可见模糊');
     expect(blurOf(0), greaterThan(blurOf(2)), reason: '越往视口顶部越模糊');
@@ -479,7 +485,7 @@ void main() {
 
   testWidgets('景深淡出：视口外行完全透明（边缘溶解），当前行不透明', (tester) async {
     final lines = buildLines();
-    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, 75));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -496,7 +502,7 @@ void main() {
 
   testWidgets('关闭景深模糊开关：所有行 blurSigma 为 0', (tester) async {
     final lines = buildLines();
-    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, false));
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, 0));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -509,7 +515,7 @@ void main() {
 
   testWidgets('滑动（手指按住）期间景深模糊解除，松手后恢复', (tester) async {
     final lines = buildLines();
-    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, 75));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -537,7 +543,7 @@ void main() {
 
   testWidgets('拖动滚出视口顶的行淡出到全透明（回归：不会画到封面/标题区）', (tester) async {
     final lines = buildLines();
-    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, true));
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 3 * 2000, 75));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -622,7 +628,7 @@ void main() {
 
   testWidgets('呼吸圆点不继承 DOF：独立渲染、清晰醒目，歌词文本仍被模糊压暗', (tester) async {
     final lines = linesWithInterlude();
-    await tester.pumpWidget(wrapWithLyricBlur(lines, 4000, true));
+    await tester.pumpWidget(wrapWithLyricBlur(lines, 4000, 75));
     await tester.pump();
     await tester.pumpAndSettle();
 
@@ -687,7 +693,11 @@ void main() {
     await tester.pumpAndSettle();
 
     // 圆点行 line 1 处于间奏、非当前行、景深开启（未拖动）→ 必有模糊。
-    expect(visualOf(tester, 1).blurSigma, greaterThan(0), reason: '前置：line 1 被模糊');
+    expect(
+      visualOf(tester, 1).blurSigma,
+      greaterThan(0),
+      reason: '前置：line 1 被模糊',
+    );
 
     final gestures = find.descendant(
       of: find.byType(LyricView),
@@ -722,7 +732,11 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(find.byType(BreathingDots), findsNothing, reason: '首行开始后圆点消失');
-    expect(visualOf(tester, 1).translateY - visualOf(tester, 0).translateY, 46, reason: 'line 0 高度回缩');
+    expect(
+      visualOf(tester, 1).translateY - visualOf(tester, 0).translateY,
+      46,
+      reason: 'line 0 高度回缩',
+    );
   });
 
   testWidgets('拖到远处再拖回前奏：圆点行 +28 高度恢复（回归：二次进入前奏行高错位）', (tester) async {
@@ -763,7 +777,11 @@ void main() {
       74,
       reason: '③ 二次进入前奏：line 0 高度必须重新 +28，line 1 随之下移',
     );
-    expect(topPadOf(tester, 'line 0'), 28, reason: '③ 二次进入前奏：line 0 文字下推 28，圆点不叠字');
+    expect(
+      topPadOf(tester, 'line 0'),
+      28,
+      reason: '③ 二次进入前奏：line 0 文字下推 28，圆点不叠字',
+    );
   });
 
   testWidgets('圆点动画锚定：进入/seek 重锚定，正常播放推进不重锚', (tester) async {

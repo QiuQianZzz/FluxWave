@@ -146,18 +146,46 @@ class PlaySection extends StatelessWidget {
                 onTap: () => settings.setLineLyricRevealMode(mode),
               ),
             const Divider(height: 16),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('歌词景深模糊'),
-              subtitle: Text(
-                '聚焦当前行，越往上下边缘越模糊；开启后滑动时自动解除模糊，'
-                '方便浏览前后歌词。',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
+            Text('歌词景深模糊', style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                const Icon(Icons.blur_on_rounded, size: 18),
+                Expanded(
+                  child: Slider(
+                    // 样式对齐音量滑块：Flutter 3.44 中 year2023 已弃用但默认
+                    // 仍为 true（2023 外观），置 false 启用 Material3 2024 样式；
+                    // 未来该旗标默认翻转后可连同此参数一并删除。
+                    // ignore: deprecated_member_use
+                    year2023: false,
+                    value: settings.lyricDepthBlurAmount.toDouble(),
+                    min: 0,
+                    max: 100,
+                    divisions: 100,
+                    label: '${settings.lyricDepthBlurAmount}',
+                    onChanged: (v) =>
+                        settings.setLyricDepthBlurAmount(v.round()),
+                  ),
                 ),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    '${settings.lyricDepthBlurAmount}',
+                    textAlign: TextAlign.end,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Text(
+              settings.lyricDepthBlurAmount == 0
+                  ? '已关闭，向右拖动调节强度'
+                  : '数值越大，远离当前行的歌词越模糊；滑动浏览时自动解除',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
               ),
-              value: settings.lyricDepthBlur,
-              onChanged: (v) => settings.setLyricDepthBlur(v),
             ),
             const Divider(height: 16),
             Padding(

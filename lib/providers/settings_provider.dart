@@ -95,8 +95,8 @@ class SettingsProvider extends ChangeNotifier {
   /// 与用户最新要求一致；可在设置页切回"线性扫过"。
   LineLyricRevealMode _lineLyricRevealMode = LineLyricRevealMode.staticLine;
 
-  /// 歌词景深模糊开关。默认开（部分人不喜欢该效果，可在设置页关闭）。
-  bool _lyricDepthBlur = true;
+  /// 歌词景深模糊强度（0-100，0 = 关闭）。默认 75（与旧版默认效果一致）。
+  int _lyricDepthBlurAmount = 75;
 
   /// 歌词弹簧强度档位。默认标准（轻微过冲）。
   LyricSpringPreset _lyricSpringPreset = LyricSpringPreset.standard;
@@ -151,9 +151,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 行级歌词（LRC）揭示方式（仅影响 LRC；逐字 YRC 恒走逐字动画）。
   LineLyricRevealMode get lineLyricRevealMode => _lineLyricRevealMode;
 
-  /// 歌词景深模糊开关：开启时按"距当前行的归一化距离"曲线计算模糊，靠近
-  /// 当前行几乎清晰、往可视区顶部/底部边缘渐强；滑动/自动滚动期间自动解除。
-  bool get lyricDepthBlur => _lyricDepthBlur;
+  /// 歌词景深模糊强度（0-100，0 = 关闭）：按"距当前行的距离"曲线计算模糊，
+  /// 数值越大，远离当前行的歌词越模糊；滑动/自动滚动期间自动解除。
+  int get lyricDepthBlurAmount => _lyricDepthBlurAmount;
 
   /// 歌词弹簧强度档位。
   LyricSpringPreset get lyricSpringPreset => _lyricSpringPreset;
@@ -212,7 +212,15 @@ class SettingsProvider extends ChangeNotifier {
       _lineLyricRevealMode = _resolveLineLyricRevealMode(
         prefs.getString(_kLineLyricRevealMode),
       );
-      _lyricDepthBlur = prefs.getBool(_kLyricDepthBlur) ?? true;
+      // 兼容旧版 bool 存储：false→0（关闭），true→75（默认强度）。
+      final rawBlur = prefs.get(_kLyricDepthBlur);
+      if (rawBlur is bool) {
+        _lyricDepthBlurAmount = rawBlur ? 75 : 0;
+      } else if (rawBlur is int) {
+        _lyricDepthBlurAmount = rawBlur.clamp(0, 100);
+      } else {
+        _lyricDepthBlurAmount = 75;
+      }
       _lyricSpringPreset = LyricSpringPreset.values.firstWhere(
         (e) => e.name == prefs.getString(_kLyricSpringPreset),
         orElse: () => LyricSpringPreset.standard,
@@ -321,13 +329,14 @@ class SettingsProvider extends ChangeNotifier {
     return LineLyricRevealMode.staticLine;
   }
 
-  /// 切换歌词景深模糊开关（持久化）。立即作用于歌词页。
-  Future<void> setLyricDepthBlur(bool v) async {
-    if (v == _lyricDepthBlur) return;
-    _lyricDepthBlur = v;
+  /// 切换歌词景深模糊强度（0-100，持久化）。立即作用于歌词页。
+  Future<void> setLyricDepthBlurAmount(int v) async {
+    final clamped = v.clamp(0, 100);
+    if (clamped == _lyricDepthBlurAmount) return;
+    _lyricDepthBlurAmount = clamped;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kLyricDepthBlur, v);
+    await prefs.setInt(_kLyricDepthBlur, clamped);
   }
 
   /// 切换歌词弹簧强度档位（持久化）。立即作用于歌词页。

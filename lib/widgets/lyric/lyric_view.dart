@@ -47,10 +47,10 @@ class LyricView extends StatefulWidget {
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 不受影响。
   final LineLyricRevealMode lineLyricRevealMode;
 
-  /// 是否启用歌词景深模糊：开启时按"距当前行的行数"曲线计算模糊（与视口
-  /// 尺寸/字号无关），相邻行即有可见模糊、越远越糊；滑动/拖动期间自动解除
-  /// 模糊（仅保留视口边缘淡出）。
-  final bool lyricDepthBlur;
+  /// 歌词景深模糊强度（0-100，0 = 关闭）：按"距当前行的行数"曲线计算模糊
+  /// （与视口尺寸/字号无关），数值越大相邻行越糊、越远越糊；滑动/拖动期间
+  /// 自动解除模糊（仅保留视口边缘淡出）。
+  final int lyricDepthBlurAmount;
 
   /// 行级歌词（LRC）卡拉 OK 渐变的淡出宽度，相对当前字号的比例。渐变起点
   /// 固定、长度 = `wordFadeWidth × fontSize`。
@@ -69,7 +69,7 @@ class LyricView extends StatefulWidget {
     this.lyricOffsetMs = 0,
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
-    this.lyricDepthBlur = true,
+    this.lyricDepthBlurAmount = 75,
     this.wordFadeWidth = 0.5,
     this.lyricSpringPreset = LyricSpringPreset.standard,
     this.onSeekLine,
@@ -156,11 +156,11 @@ class _LyricViewState extends State<LyricView>
 
   // ── 歌词景深（模糊 + 边缘淡出）──
   // 模糊按"距当前行的行数"线性增长，上方行比下方多 +1 距离（已播区更糊）；
-  // 窄视口（≤1024）整体 ×0.8，整体强度 ×0.75。视口顶/底用像素淡出
-  // （_edgeFadeOf）溶解，配合外层硬裁剪保证不画到面板之外。
+  // 窄视口（≤1024）整体 ×0.8；整体强度由 lyricDepthBlurAmount/100 决定
+  // （默认 75 与旧版 ×0.75 一致）。视口顶/底用像素淡出（_edgeFadeOf）溶解，
+  // 配合外层硬裁剪保证不画到面板之外。
   static const _kBlurNarrowWidth = 1024.0;
   static const _kBlurNarrowScale = 0.8;
-  static const _kBlurIntensity = 0.75;
 
   // 视口边缘淡出长度：行目标顶边进入顶/底 [_kEdgeFadeLength] 后线性淡出到
   // 全透明。配合外层 ClipRect，保证歌词绝不会画到歌词面板之外
@@ -555,7 +555,7 @@ class _LyricViewState extends State<LyricView>
   // ── 景深模糊 ──
 
   /// 景深模糊 sigma：按"距当前行的行数"线性增长。上方行距离 +1（已播区比
-  /// 未播区更糊）；下方相邻行距离 1 → sigma 2×0.75=1.5；当前行恒 0。
+  /// 未播区更糊）；下方相邻行距离 1 → sigma 2×amount/100；当前行恒 0。
   double _blurSigmaFor(int index, double viewportWidth) {
     if (index == _currentIndex) return 0;
     final distance = index < _currentIndex
@@ -563,7 +563,7 @@ class _LyricViewState extends State<LyricView>
         : (index - _currentIndex);
     final level = 1 + distance;
     final narrow = viewportWidth <= _kBlurNarrowWidth ? _kBlurNarrowScale : 1.0;
-    return level * narrow * _kBlurIntensity;
+    return level * narrow * (widget.lyricDepthBlurAmount / 100);
   }
 
   /// 视口边缘淡出：按行中心与视口顶/底的距离线性淡出到全透明（区间
@@ -762,7 +762,7 @@ class _LyricViewState extends State<LyricView>
     final layout = _layouts[i];
     if (layout == null) return const SizedBox.shrink();
 
-    final dofEnabled = widget.lyricDepthBlur && !scrolling;
+    final dofEnabled = widget.lyricDepthBlurAmount > 0 && !scrolling;
     final blurSigma = dofEnabled ? _blurSigmaFor(i, maxWidth) : 0.0;
     final edgeFade = _edgeFadeOf(i);
     // 圆点槽在行盒内顶部：行盒保持引擎认为的位置（yOf..yOf+itemH），把

@@ -968,7 +968,7 @@ class _LyricPanelState extends State<_LyricPanel> {
                     inactiveColor: cs.onSurfaceVariant,
                     fontSize: widget.fontSize,
                     lineLyricRevealMode: settings.lineLyricRevealMode,
-                    lyricDepthBlur: settings.lyricDepthBlur,
+                    lyricDepthBlurAmount: settings.lyricDepthBlurAmount,
                     lyricSpringPreset: settings.lyricSpringPreset,
                     onSeekLine: (startMs) {
                       context.read<PlayerProvider>().seek(

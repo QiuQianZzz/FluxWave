@@ -61,25 +61,33 @@ void main() {
     expect(s3.lineLyricRevealMode, LineLyricRevealMode.staticLine);
   });
 
-  test('默认开启歌词景深模糊；切换并持久化', () async {
+  test('歌词景深模糊默认 75；调节并持久化；兼容旧版布尔存储', () async {
     SharedPreferences.setMockInitialValues({});
     final s = SettingsProvider();
-    expect(s.lyricDepthBlur, isTrue);
+    expect(s.lyricDepthBlurAmount, 75);
 
     await s.init();
-    expect(s.lyricDepthBlur, isTrue);
+    expect(s.lyricDepthBlurAmount, 75);
 
-    await s.setLyricDepthBlur(false);
-    expect(s.lyricDepthBlur, isFalse);
+    await s.setLyricDepthBlurAmount(30);
+    expect(s.lyricDepthBlurAmount, 30);
+    await s.setLyricDepthBlurAmount(150);
+    expect(s.lyricDepthBlurAmount, 100, reason: '超上限应被钳制到 100');
 
     final s2 = SettingsProvider();
     await s2.init();
-    expect(s2.lyricDepthBlur, isFalse);
+    expect(s2.lyricDepthBlurAmount, 100);
 
+    // 旧版 bool 存储迁移：false→0（关闭）、true→75（默认强度）。
     SharedPreferences.setMockInitialValues({'lyric_depth_blur': false});
     final s3 = SettingsProvider();
     await s3.init();
-    expect(s3.lyricDepthBlur, isFalse);
+    expect(s3.lyricDepthBlurAmount, 0);
+
+    SharedPreferences.setMockInitialValues({'lyric_depth_blur': true});
+    final s4 = SettingsProvider();
+    await s4.init();
+    expect(s4.lyricDepthBlurAmount, 75);
   });
 
   test('流体背景律动默认关；切换并持久化', () async {
