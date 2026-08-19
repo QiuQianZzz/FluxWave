@@ -1,3 +1,6 @@
+// 该文件为调试测量脚本，print 输出是用途本身。
+// ignore_for_file: avoid_print
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fluxwave/core/lyric/lyric_spring.dart';
