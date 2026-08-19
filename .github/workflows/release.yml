@@ -129,10 +129,20 @@ jobs:
           if [ -z "$version" ]; then version="${GITHUB_REF_NAME#v}"; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Sync pubspec version
+      - name: Resolve pubspec version
+        id: pubspec
+        shell: bash
         run: |
-          build_num=$(grep -oP 'version: .*\+\K\d+' pubspec.yaml)
-          sed -i "s/^version: .*/version: ${{ steps.tag.outputs.version }}+${build_num}/" pubspec.yaml
+          # pubspec.yaml 是版本唯一来源：versionName 与 versionCode 均取自其中，
+          # 构建时显式传入 --build-name/--build-number，不再改写 pubspec 文件。
+          version=$(awk '/^version: /{print $2; exit}' pubspec.yaml)
+          name="${version%%+*}"
+          num="${version##*+}"
+          if [ -z "$num" ] || [ "$num" = "$version" ]; then num="0"; fi
+          echo "pubspec_version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_name=$name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$num" >> "$GITHUB_OUTPUT"
+          echo "使用 pubspec 版本: $version（versionName: $name，versionCode: $num）"
 
       - name: Decode keystore
         if: env.KEYSTORE_BASE64 != ''
@@ -148,7 +158,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: flutter build apk --release --split-per-abi
+        run: >-
+          flutter build apk --release --split-per-abi
+          --build-name=${{ steps.pubspec.outputs.version_name }}
+          --build-number=${{ steps.pubspec.outputs.build_number }}
 
       - name: Build universal APK
         env:
@@ -156,7 +169,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: flutter build apk --release
+        run: >-
+          flutter build apk --release
+          --build-name=${{ steps.pubspec.outputs.version_name }}
+          --build-number=${{ steps.pubspec.outputs.build_number }}
 
       - name: Rename APKs
         run: |
