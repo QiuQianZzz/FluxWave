@@ -125,129 +125,142 @@ class _PlayerPageState extends State<PlayerPage>
         );
         final cs = accentTheme.colorScheme;
         return Theme(
-      data: accentTheme,
-      child: Scaffold(
-      // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
-      body: Stack(
-        children: [
-          // ── 流体背景（全屏播放页底层，GPU shader，颜色跟随封面） ──
-          const Positioned.fill(child: FluidBackground()),
-          // ── 内容区 ──
-          isWide
-              ? _buildWideContent(theme, cs, player, song, topPad)
-              : AnimatedBuilder(
-                  animation: _lyricsTransition,
-                  builder: (context, _) {
-                    final t = _lyricsTransition.value;
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragStart: (d) {
-                        _dragStartValue = _lyricsTransition.value;
-                      },
-                      onHorizontalDragUpdate: (d) {
-                        if (song == null) return;
-                        final width = MediaQuery.sizeOf(context).width;
-                        if (width <= 0) return;
-                        // 放大系数映射（更跟手）：手指移动 = 1.5 倍页面移动，
-                        // 松手后从当前位置补到目标态。
-                        final delta = -d.delta.dx / width * _lyricsDragSensitivity;
-                        // AnimatedBuilder 已监听 _lyricsTransition，value 赋值自动触发重建
-                        _lyricsTransition.value = (_lyricsTransition.value + delta)
-                            .clamp(0.0, 1.0);
-                      },
-                      onHorizontalDragEnd: (d) {
-                        // 松手后按"拖动量 + fling 速度"决定最终态（与外部 Tab 逻辑一致）
-                        // drag > 0 = 向左拖（进歌词页），drag < 0 = 向右拖（回播放页）
-                        final v = _lyricsTransition.value;
-                        final velocity = d.primaryVelocity ?? 0;
-                        final drag = v - _dragStartValue;
-                        final absDrag = drag.abs();
-                        // velocity 与 drag 方向相反：向左拖 drag>0 但 velocity<0，
-                        // 传入 shouldComplete 时反转 velocity 使两者同号对齐。
-                        final shouldComplete = NavThresholds.shouldComplete(
-                          dragRatio: absDrag,
-                          velocity: -velocity,
-                          drag: drag,
-                          // 播放页歌词切换用更灵敏的阈值，避免拖太远才切换
-                          dragDistanceRatio: _lyricsDragDistanceRatio,
-                        );
-                        if (shouldComplete) {
-                          if (drag > 0) {
-                            _lyricsTransition.forward();
-                          } else {
-                            _lyricsTransition.reverse();
-                          }
-                        } else {
-                          // 未达阈值：回弹到最近态
-                          if (v > 0.5) {
-                            _lyricsTransition.forward();
-                          } else {
-                            _lyricsTransition.reverse();
-                          }
-                        }
-                        // forward/reverse 会触发 AnimatedBuilder 重建，但顶部栏图标
-                        // 不在 AnimatedBuilder 内，需 setState 触发整树重建
-                        setState(() {});
-                      },
-                      child: song == null
-                          ? const _NoNowPlaying()
-                          : _buildPlaybackContent(
-                              theme, cs, player, song, t, topPad,
-                            ),
-                    );
-                  },
-                ),
-          // ── 顶部栏（透明背景，在最上层） ──
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: _extraTop(context),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      iconSize: 24,
-                      visualDensity: VisualDensity.compact,
-                      splashRadius: 14,
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                      onPressed: () => Navigator.of(context).pop(),
-                      color: cs.onSurfaceVariant,
-                    ),
-                    const Spacer(),
-                    // 窄屏：队列钮已挪入控制行，右上角仅保留歌词切换。
-                    // 宽屏：歌词常驻右栏，无需歌词切换按钮（右上角留待菜单钮）。
-                    if (song != null && !isWide)
-                      IconButton(
-                        iconSize: 22,
-                        visualDensity: VisualDensity.compact,
-                        splashRadius: 14,
-                        tooltip: _isLyricsMode ? '关闭歌词' : '歌词',
-                        icon: Icon(
-                          _isLyricsMode
-                              ? Icons.lyrics_rounded
-                              : Icons.lyrics_outlined,
-                        ),
-                        onPressed: _toggleLyrics,
-                        color: _isLyricsMode ? cs.primary : cs.onSurfaceVariant,
+          data: accentTheme,
+          child: Scaffold(
+            // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
+            body: Stack(
+              children: [
+                // ── 流体背景（全屏播放页底层，GPU shader，颜色跟随封面） ──
+                const Positioned.fill(child: FluidBackground()),
+                // ── 内容区 ──
+                isWide
+                    ? _buildWideContent(theme, cs, player, song, topPad)
+                    : AnimatedBuilder(
+                        animation: _lyricsTransition,
+                        builder: (context, _) {
+                          final t = _lyricsTransition.value;
+                          return GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onHorizontalDragStart: (d) {
+                              _dragStartValue = _lyricsTransition.value;
+                            },
+                            onHorizontalDragUpdate: (d) {
+                              if (song == null) return;
+                              final width = MediaQuery.sizeOf(context).width;
+                              if (width <= 0) return;
+                              // 放大系数映射（更跟手）：手指移动 = 1.5 倍页面移动，
+                              // 松手后从当前位置补到目标态。
+                              final delta =
+                                  -d.delta.dx / width * _lyricsDragSensitivity;
+                              // AnimatedBuilder 已监听 _lyricsTransition，value 赋值自动触发重建
+                              _lyricsTransition.value =
+                                  (_lyricsTransition.value + delta).clamp(
+                                    0.0,
+                                    1.0,
+                                  );
+                            },
+                            onHorizontalDragEnd: (d) {
+                              // 松手后按"拖动量 + fling 速度"决定最终态（与外部 Tab 逻辑一致）
+                              // drag > 0 = 向左拖（进歌词页），drag < 0 = 向右拖（回播放页）
+                              final v = _lyricsTransition.value;
+                              final velocity = d.primaryVelocity ?? 0;
+                              final drag = v - _dragStartValue;
+                              final absDrag = drag.abs();
+                              // velocity 与 drag 方向相反：向左拖 drag>0 但 velocity<0，
+                              // 传入 shouldComplete 时反转 velocity 使两者同号对齐。
+                              final shouldComplete =
+                                  NavThresholds.shouldComplete(
+                                    dragRatio: absDrag,
+                                    velocity: -velocity,
+                                    drag: drag,
+                                    // 播放页歌词切换用更灵敏的阈值，避免拖太远才切换
+                                    dragDistanceRatio: _lyricsDragDistanceRatio,
+                                  );
+                              if (shouldComplete) {
+                                if (drag > 0) {
+                                  _lyricsTransition.forward();
+                                } else {
+                                  _lyricsTransition.reverse();
+                                }
+                              } else {
+                                // 未达阈值：回弹到最近态
+                                if (v > 0.5) {
+                                  _lyricsTransition.forward();
+                                } else {
+                                  _lyricsTransition.reverse();
+                                }
+                              }
+                              // forward/reverse 会触发 AnimatedBuilder 重建，但顶部栏图标
+                              // 不在 AnimatedBuilder 内，需 setState 触发整树重建
+                              setState(() {});
+                            },
+                            child: song == null
+                                ? const _NoNowPlaying()
+                                : _buildPlaybackContent(
+                                    theme,
+                                    cs,
+                                    player,
+                                    song,
+                                    t,
+                                    topPad,
+                                  ),
+                          );
+                        },
                       ),
-                  ],
+                // ── 顶部栏（透明背景，在最上层） ──
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: _extraTop(context),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            iconSize: 24,
+                            visualDensity: VisualDensity.compact,
+                            splashRadius: 14,
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                            onPressed: () => Navigator.of(context).pop(),
+                            color: cs.onSurfaceVariant,
+                          ),
+                          const Spacer(),
+                          // 窄屏：队列钮已挪入控制行，右上角仅保留歌词切换。
+                          // 宽屏：歌词常驻右栏，无需歌词切换按钮（右上角留待菜单钮）。
+                          if (song != null && !isWide)
+                            IconButton(
+                              iconSize: 22,
+                              visualDensity: VisualDensity.compact,
+                              splashRadius: 14,
+                              tooltip: _isLyricsMode ? '关闭歌词' : '歌词',
+                              icon: Icon(
+                                _isLyricsMode
+                                    ? Icons.lyrics_rounded
+                                    : Icons.lyrics_outlined,
+                              ),
+                              onPressed: _toggleLyrics,
+                              color: _isLyricsMode
+                                  ? cs.primary
+                                  : cs.onSurfaceVariant,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
-        ],
-      ),
-      ),
-    );
+        );
       },
     );
   }
+
   /// 当前是否为移动平台（Android/iOS）。
   /// 按平台而非屏幕宽度判定，适配宽屏 Android 平板。
   bool _isMobile(BuildContext context) => PlatformUtils.isMobile;
@@ -776,10 +789,7 @@ class _PlayerPageState extends State<PlayerPage>
   ) async {
     final nowLiked = await liked.toggle(song);
     if (!context.mounted) return;
-    AppToast.show(
-      context,
-      nowLiked ? '已收藏到「我喜欢的音乐」' : '已取消收藏',
-    );
+    AppToast.show(context, nowLiked ? '已收藏到「我喜欢的音乐」' : '已取消收藏');
   }
 
   Widget _buildQuality(ColorScheme cs) {
@@ -822,9 +832,7 @@ class _PlayerPageState extends State<PlayerPage>
         parts.join(' · '),
         style: Theme.of(
           context,
-        ).textTheme.labelMedium?.copyWith(
-          color: cs.onSurfaceVariant,
-        ),
+        ).textTheme.labelMedium?.copyWith(color: cs.onSurfaceVariant),
       ),
     );
   }
@@ -917,57 +925,64 @@ class _LyricPanelState extends State<_LyricPanel> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: widget.height,
-      width: double.infinity,
-      child: _loading
-          ? Center(
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.onSurfaceVariant,
+    // 声明竖直拖动：与 PlayerPage 外层「水平拖动切换 播放页⇄歌词页」的手势
+    // 分流。歌词列表是竖直滚动的，若不声明，真实手指滚动时的轻微横向抖动会
+    // 被外层水平手势认走（先越过 slop 者胜），滚动歌词时容易误切回播放页。
+    // 声明后竖直方向先越 slop 即胜出，滚动交由 LyricView 自己的 raw Listener
+    // 处理（不参与手势竞技场，不受影响）。
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragStart: (_) {},
+      child: SizedBox(
+        height: widget.height,
+        width: double.infinity,
+        child: _loading
+            ? Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            )
-          : _lines.isEmpty
-          ? Center(
-              child: Text(
-                '暂无歌词',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(
-                  color: cs.onSurfaceVariant,
+              )
+            : _lines.isEmpty
+            ? Center(
+                child: Text(
+                  '暂无歌词',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
                 ),
+              )
+            : StreamBuilder<Duration>(
+                stream: context.read<PlayerProvider>().positionStream,
+                builder: (context, snap) {
+                  final pos = snap.data?.inMilliseconds ?? 0;
+                  final settings = context.watch<SettingsProvider>();
+                  return LyricView(
+                    lines: _lines,
+                    currentTimeMs: pos,
+                    activeColor: cs.primary,
+                    inactiveColor: cs.onSurfaceVariant,
+                    fontSize: widget.fontSize,
+                    lineLyricRevealMode: settings.lineLyricRevealMode,
+                    lyricDepthBlur: settings.lyricDepthBlur,
+                    lyricSpringEnabled: settings.lyricSpringEnabled,
+                    lyricSpringPreset: settings.lyricSpringPreset,
+                    onSeekLine: (startMs) {
+                      context.read<PlayerProvider>().seek(
+                        Duration(milliseconds: startMs),
+                      );
+                    },
+                    onLyricLongPress: (startMs) {
+                      AppToast.show(context, '歌词截图分享：待实现');
+                    },
+                  );
+                },
               ),
-            )
-          : StreamBuilder<Duration>(
-              stream: context.read<PlayerProvider>().positionStream,
-              builder: (context, snap) {
-                final pos = snap.data?.inMilliseconds ?? 0;
-                final settings = context.watch<SettingsProvider>();
-                return LyricView(
-                  lines: _lines,
-                  currentTimeMs: pos,
-                  activeColor: cs.primary,
-                  inactiveColor: cs.onSurfaceVariant,
-                  fontSize: widget.fontSize,
-                  lineLyricRevealMode: settings.lineLyricRevealMode,
-                  lyricDepthBlur: settings.lyricDepthBlur,
-                  lyricSpringEnabled: settings.lyricSpringEnabled,
-                  lyricSpringPreset: settings.lyricSpringPreset,
-                  onSeekLine: (startMs) {
-                    context.read<PlayerProvider>().seek(
-                      Duration(milliseconds: startMs),
-                    );
-                  },
-                  onLyricLongPress: (startMs) {
-                    AppToast.show(context, '歌词截图分享：待实现');
-                  },
-                );
-              },
-            ),
+      ),
     );
   }
 }
@@ -1088,74 +1103,72 @@ class _NowPlayingProgressState extends State<_NowPlayingProgress>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: trackPad),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final trackWidth = constraints.maxWidth;
-              return GestureDetector(
-                key: _trackKey,
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragStart: (d) => _dragStart(d, trackWidth),
-                onHorizontalDragUpdate: (d) => _dragUpdate(d, trackWidth),
-                onHorizontalDragEnd: (d) => _dragEnd(durMs),
-                onTapUp: (d) => _tapSeek(d, durMs, trackWidth),
-                child: CustomPaint(
-                  painter: _WaveTrackPainter(
-                    progress: progress,
-                    phase: _wave.value * math.pi * 2,
-                    // _amp 统一控制振幅：播放→1、暂停/拖动→0，过渡 500ms
-                    amplitude: _amp.value * (kWaveAmplitude / dpr),
-                    inactive: cs.onSurfaceVariant.withValues(alpha: 0.4),
-                    active: cs.primary,
-                    thumb: cs.primary,
-                    dpr: dpr,
-                  ),
-                  child: const SizedBox(height: 35, width: double.infinity),
-                ),
-              );
-            },
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(
-            top: 2,
-            left: trackPad,
-            right: trackPad,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                child: Text(
-                  _PlayerPageState._fmt(
-                    Duration(
-                      milliseconds: _drag != null
-                          ? (_drag! * durMs).round()
-                          : liveMs,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: trackPad),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final trackWidth = constraints.maxWidth;
+                  return GestureDetector(
+                    key: _trackKey,
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragStart: (d) => _dragStart(d, trackWidth),
+                    onHorizontalDragUpdate: (d) => _dragUpdate(d, trackWidth),
+                    onHorizontalDragEnd: (d) => _dragEnd(durMs),
+                    onTapUp: (d) => _tapSeek(d, durMs, trackWidth),
+                    child: CustomPaint(
+                      painter: _WaveTrackPainter(
+                        progress: progress,
+                        phase: _wave.value * math.pi * 2,
+                        // _amp 统一控制振幅：播放→1、暂停/拖动→0，过渡 500ms
+                        amplitude: _amp.value * (kWaveAmplitude / dpr),
+                        inactive: cs.onSurfaceVariant.withValues(alpha: 0.4),
+                        active: cs.primary,
+                        thumb: cs.primary,
+                        dpr: dpr,
+                      ),
+                      child: const SizedBox(height: 35, width: double.infinity),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(
+                top: 2,
+                left: trackPad,
+                right: trackPad,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      _PlayerPageState._fmt(
+                        Duration(
+                          milliseconds: _drag != null
+                              ? (_drag! * durMs).round()
+                              : liveMs,
+                        ),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ),
-              Flexible(
-                child: Text(
-                  _PlayerPageState._fmt(Duration(milliseconds: durMs)),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
+                  Flexible(
+                    child: Text(
+                      _PlayerPageState._fmt(Duration(milliseconds: durMs)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
         ),
       ),
     );
