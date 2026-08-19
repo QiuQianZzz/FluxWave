@@ -125,12 +125,13 @@ class _LyricViewState extends State<LyricView>
   int? _lastDotsIndex;
   int _lastDotsDisplayMs = 0;
 
-  // ── seek 状态 ──
-  // 由当前时间与上次报告时间的差值推断（本播放器 positionStream 200ms 一报，
-  // 正常推进 dt≈200；回跳 / 大幅前跳 = seek）。seek 时引擎用固定稳定弹簧
-  // 参数 + 禁用级联延迟。
+// ── seek 状态 ──
   int _lastReportedTimeMs = 0;
   bool _seekInProgress = false;
+
+  /// 点击行后临时锁定目标 index，防止 `_updateCurrent` 在弹簧动画期间用旧播放
+  /// 位置覆盖。当音频位置追上 [_tapHoldIndex] 后自动解除。
+  int? _tapHoldIndex;
 
   // ── 圆点 60fps 时钟 ──
   // 位置流 200ms 一报，直接驱动圆点呼吸太粗；改用 ticker 逐帧推进
@@ -216,6 +217,7 @@ class _LyricViewState extends State<LyricView>
       _dotsGotPosition = false;
       _dotsPauseTimer?.cancel();
       _dotsPauseTimer = null;
+      _tapHoldIndex = null;
       _updateCurrent();
     } else {
       final metricsChanged =
@@ -258,15 +260,24 @@ class _LyricViewState extends State<LyricView>
     final displayTimeMs = _effectiveTimeMs(widget.currentTimeMs);
     final dt = displayTimeMs - _lastReportedTimeMs;
     _lastReportedTimeMs = displayTimeMs;
-    // 向前大跳不算 seek（播放推进/快进均保留级联错落）；向后跳一定是
-    // 用户拖进度条 → seek。
-    // 前进方向的 seek（点击行 / 进度条）由 [_handleLineTap] 显式标记。
+    // 向后跳 = 拖进度条 → seek。
     _seekInProgress = dt < -100;
     _engine.isSeeking = _seekInProgress;
+
     final newIndex = LyricParser.findCurrentLineIndex(
       widget.lines,
       displayTimeMs,
     );
+
+    // 点击行锁定：音频追上目标行后解除，恢复正常跟踪。
+    if (_tapHoldIndex != null) {
+      if (newIndex == _tapHoldIndex && dt >= 0) {
+        _tapHoldIndex = null;
+      } else {
+        return;
+      }
+    }
+
     if (newIndex != _currentIndex) {
       _currentIndex = newIndex;
       _engine.setCurrent(newIndex, force: _needsJump);
@@ -288,14 +299,14 @@ class _LyricViewState extends State<LyricView>
     );
     if (targetIndex < 0) return;
     _currentIndex = targetIndex;
-    // 点击行视为 seek：本轮及后续落位用稳定弹簧参数，直到下一次正常推进。
+    // 锁定目标行：_updateCurrent 在音频追上之前不覆盖，保证弹簧动画完整播放。
+    _tapHoldIndex = targetIndex;
     _lastReportedTimeMs = _effectiveTimeMs(startTimeMs);
-    _seekInProgress = true;
-    _engine.isSeeking = true;
     _dotsGotPosition = true;
     _engine.resumeFollow();
     _engine.setCurrent(targetIndex, force: false);
     _scheduleTicks();
+    if (mounted) setState(() {});
   }
 
   // ── 帧循环 ──
@@ -396,10 +407,13 @@ class _LyricViewState extends State<LyricView>
       _pointerDragged = false;
       _startUserScrollHold();
     } else if (wasDown) {
-      // 纯轻点：解除按下时冻结的对齐锚点，恢复跟随（不弹回，只是让
-      // 后续切句能正常跟）。scrolling true→false，需重建恢复模糊。
-      _engine.resumeFollow();
-      _scheduleTicks();
+      // 纯轻点：解除按下状态（scrolling true→false，恢复模糊）。
+      // resumeFollow 留给 _handleLineTap 处理（若有 onTapLine），避免在
+      // InkWell onTap 之前重置 heldIndex 导致 seek 失效。
+      if (widget.onSeekLine == null) {
+        _engine.resumeFollow();
+        _scheduleTicks();
+      }
       setState(() {});
     }
   }
@@ -777,6 +791,14 @@ class _LyricViewState extends State<LyricView>
       scale: _engine.scaleOf(i),
       alpha: _engine.alphaOf(i) * edgeFade,
       blurSigma: blurSigma,
+      onTap: widget.onSeekLine == null
+          ? null
+          : () => _handleLineTap(line.startTimeMs),
+      onLongPress: widget.onLyricLongPress == null
+          ? (widget.onSeekLine == null
+                ? null
+                : () => widget.onSeekLine!(line.startTimeMs))
+          : () => widget.onLyricLongPress!(line.startTimeMs),
       child: Padding(
         padding: const EdgeInsets.only(left: kLyricLeftBuffer),
         child: SizedBox(
@@ -796,14 +818,6 @@ class _LyricViewState extends State<LyricView>
             showTranslation: widget.showTranslation,
             lineLyricRevealMode: widget.lineLyricRevealMode,
             wordFadeWidth: widget.wordFadeWidth,
-            onTapLine: widget.onSeekLine == null
-                ? null
-                : () => _handleLineTap(line.startTimeMs),
-            onLongPressLine: widget.onLyricLongPress == null
-                ? (widget.onSeekLine == null
-                      ? null
-                      : () => widget.onSeekLine!(line.startTimeMs))
-                : () => widget.onLyricLongPress!(line.startTimeMs),
           ),
           ),
         ),

@@ -32,8 +32,6 @@ class LyricLineView extends StatelessWidget {
   final Color inactiveColor;
   final double fontSize;
   final double? translationFontSize;
-  final VoidCallback? onTapLine;
-  final VoidCallback? onLongPressLine;
   final bool showTranslation;
 
   /// 行级歌词（LRC）的揭示方式；逐字 YRC 不受影响。
@@ -53,8 +51,6 @@ class LyricLineView extends StatelessWidget {
     required this.inactiveColor,
     required this.fontSize,
     this.translationFontSize,
-    this.onTapLine,
-    this.onLongPressLine,
     this.showTranslation = true,
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
     this.wordFadeWidth = 0.5,
@@ -77,7 +73,6 @@ class LyricLineView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 画布文字对读屏不可见，用 Semantics 补回整行歌词。
         Semantics(
           label: line.text,
           container: true,
@@ -113,22 +108,7 @@ class LyricLineView extends StatelessWidget {
       ],
     );
 
-    if (onTapLine == null && onLongPressLine == null) return child;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTapLine,
-        onLongPress: onLongPressLine,
-        borderRadius: BorderRadius.circular(8),
-        splashColor: Theme.of(
-          context,
-        ).colorScheme.primary.withValues(alpha: 0.12),
-        highlightColor: Theme.of(
-          context,
-        ).colorScheme.primary.withValues(alpha: 0.06),
-        child: child,
-      ),
-    );
+    return child;
   }
 }
 
@@ -145,6 +125,8 @@ class LyricLineVisual extends StatelessWidget {
   final double scale;
   final double alpha;
   final double blurSigma;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   const LyricLineVisual({
     super.key,
@@ -153,32 +135,44 @@ class LyricLineVisual extends StatelessWidget {
     this.scale = 1,
     this.alpha = 1,
     this.blurSigma = 0,
+    this.onTap,
+    this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    // 视觉变换放最外层：Translate 在外（行偏移），向内是缩放/透明度/模糊。
-    // 若把 Translate 包在 ImageFiltered 内侧，ImageFiltered 的盒子会平铺在
-    // Stack 原点 (0,0)，其 RenderBox.hitTest 用 size.contains 判断命中，行
-    // 偏移后位于盒子下缘之外的点击（如点击非当前行 seek）会被整段吞掉。
-    final visual = Transform.scale(
+    // blur 只包裹文字内容（child），不包裹 InkWell，避免 ImageFiltered 吞点击。
+    final blurred = blurSigma > 0.05
+        ? ImageFiltered(
+            imageFilter: ImageFilter.blur(
+              sigmaX: blurSigma,
+              sigmaY: blurSigma,
+            ),
+            child: child,
+          )
+        : child;
+    final scaled = Transform.scale(
       scale: scale,
-      // TransformOrigin(0, 1)（LTR 左下角）：放大时左边缘保持不动，
-      // 避免聚焦行左溢出可视区。
       alignment: Alignment.bottomLeft,
-      child: Opacity(opacity: alpha.clamp(0.0, 1.0), child: child),
+      child: Opacity(opacity: alpha.clamp(0.0, 1.0), child: blurred),
     );
+    // InkWell 在 Transform.translate 内部：跟随行偏移，hit test 命中正确位置。
+    final inner = (onTap != null || onLongPress != null)
+        ? Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              onLongPress: onLongPress,
+              borderRadius: BorderRadius.circular(8),
+              splashColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+              highlightColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.06),
+              child: scaled,
+            ),
+          )
+        : scaled;
     return Transform.translate(
       offset: Offset(0, translateY),
-      child: blurSigma > 0.05
-          ? ImageFiltered(
-              imageFilter: ImageFilter.blur(
-                sigmaX: blurSigma,
-                sigmaY: blurSigma,
-              ),
-              child: visual,
-            )
-          : visual,
+      child: inner,
     );
   }
 }

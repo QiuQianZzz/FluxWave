@@ -341,13 +341,13 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    // 点击列表里某一行的 InkWell：应清掉窗口并 seek + 跟回目标行。
-    final inkWells = find.descendant(
+    // 点击列表里某一行：应清掉窗口并 seek + 跟回目标行。
+    final gestureDetectors = find.descendant(
       of: find.byType(LyricView),
       matching: find.byType(InkWell),
     );
-    expect(inkWells, findsWidgets);
-    await tester.tap(inkWells.at(1));
+    expect(gestureDetectors, findsWidgets);
+    await tester.tap(gestureDetectors.at(1));
     await tester.pumpAndSettle();
 
     expect(seeked, 2000, reason: '点击应触发第 1 行 seek');
@@ -689,11 +689,11 @@ void main() {
     // 圆点行 line 1 处于间奏、非当前行、景深开启（未拖动）→ 必有模糊。
     expect(visualOf(tester, 1).blurSigma, greaterThan(0), reason: '前置：line 1 被模糊');
 
-    final inks = find.descendant(
+    final gestures = find.descendant(
       of: find.byType(LyricView),
       matching: find.byType(InkWell),
     );
-    await tester.tap(inks.at(1));
+    await tester.tap(gestures.at(1));
     await tester.pump();
     expect(seeked, 8000, reason: '点击被模糊的非当前行必须能 seek');
   });

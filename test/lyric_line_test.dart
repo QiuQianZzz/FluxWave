@@ -218,7 +218,7 @@ void main() {
       expect(find.text('你好'), findsNothing);
     });
 
-    testWidgets('点击行触发 onTapLine', (tester) async {
+    testWidgets('点击行触发 onTap', (tester) async {
       const line = LyricLine(text: '测试歌词', startTimeMs: 0, endTimeMs: 2000);
       final layout = measureLyricLine(
         line: line,
@@ -229,15 +229,17 @@ void main() {
       var tapped = false;
       await tester.pumpWidget(
         wrap(
-          LyricLineView(
-            line: line,
-            layout: layout,
-            isActive: true,
-            currentTimeMs: 0,
-            activeColor: activeColor,
-            inactiveColor: inactiveColor,
-            fontSize: 18,
-            onTapLine: () => tapped = true,
+          LyricLineVisual(
+            onTap: () => tapped = true,
+            child: LyricLineView(
+              line: line,
+              layout: layout,
+              isActive: true,
+              currentTimeMs: 0,
+              activeColor: activeColor,
+              inactiveColor: inactiveColor,
+              fontSize: 18,
+            ),
           ),
         ),
       );
@@ -249,7 +251,7 @@ void main() {
       expect(tapped, isTrue);
     });
 
-    testWidgets('长按行触发 onLongPressLine', (tester) async {
+    testWidgets('长按行触发 onLongPress', (tester) async {
       const line = LyricLine(text: '测试歌词', startTimeMs: 0, endTimeMs: 2000);
       final layout = measureLyricLine(
         line: line,
@@ -260,15 +262,17 @@ void main() {
       var longPressed = false;
       await tester.pumpWidget(
         wrap(
-          LyricLineView(
-            line: line,
-            layout: layout,
-            isActive: true,
-            currentTimeMs: 0,
-            activeColor: activeColor,
-            inactiveColor: inactiveColor,
-            fontSize: 18,
-            onLongPressLine: () => longPressed = true,
+          LyricLineVisual(
+            onLongPress: () => longPressed = true,
+            child: LyricLineView(
+              line: line,
+              layout: layout,
+              isActive: true,
+              currentTimeMs: 0,
+              activeColor: activeColor,
+              inactiveColor: inactiveColor,
+              fontSize: 18,
+            ),
           ),
         ),
       );
