@@ -9,13 +9,11 @@ import 'package:fluxwave/widgets/lyric/lyric_spring_state.dart';
 /// 构造 20 行、每行高 40px、每行 2s 的引擎。
 LyricEngine makeEngine({
   LyricSpringPreset preset = LyricSpringPreset.standard,
-  bool springEnabled = true,
 }) => LyricEngine(
   lineCount: 20,
   lineHeights: List.filled(20, 40),
   lineStartMs: List<int>.generate(20, (i) => i * 2000),
   preset: preset,
-  springEnabled: springEnabled,
 );
 
 void main() {
@@ -96,7 +94,11 @@ void main() {
         e.tick(16);
       }
       for (var i = 0; i < 20; i++) {
-        expect(e.yOf(i), closeTo(0.2 * 600 + (i - 3) * 40, 1e-6), reason: '行 $i 收敛到 calcLayout 目标');
+        expect(
+          e.yOf(i),
+          closeTo(0.2 * 600 + (i - 3) * 40, 1e-6),
+          reason: '行 $i 收敛到 calcLayout 目标',
+        );
       }
     });
   });
@@ -124,7 +126,11 @@ void main() {
       }
       expect(e.anyMoving, isFalse);
       for (var i = 0; i < 20; i++) {
-        expect(e.yOf(i), closeTo(0.2 * 600 + (i - 3) * 40, 1e-6), reason: '行 $i 收敛');
+        expect(
+          e.yOf(i),
+          closeTo(0.2 * 600 + (i - 3) * 40, 1e-6),
+          reason: '行 $i 收敛',
+        );
       }
     });
 
@@ -137,11 +143,7 @@ void main() {
       e
         ..isSeeking = true
         ..setCurrent(3);
-      expect(
-        e.posYSpringParamsOf(0).stiffness,
-        90,
-        reason: 'seek 用固定稳定刚度',
-      );
+      expect(e.posYSpringParamsOf(0).stiffness, 90, reason: 'seek 用固定稳定刚度');
       expect(
         e.posYSpringParamsOf(0).damping,
         closeTo(15 * 2.2, 1e-9),
@@ -162,7 +164,11 @@ void main() {
         ..setCurrent(3);
       e.tick(8);
       final allMoved = List.generate(20, (i) => (e.yOf(i) - before[i]).abs());
-      expect(allMoved.where((v) => v > 0.01).length, 20, reason: '前置：seek 全部一起动');
+      expect(
+        allMoved.where((v) => v > 0.01).length,
+        20,
+        reason: '前置：seek 全部一起动',
+      );
 
       // 恢复正常推进（下一次 setCurrent 走动态参数 + 级联延迟）。
       e
@@ -233,7 +239,11 @@ void main() {
       e.setUserScrollOffset(120, force: true);
       expect(e.anyMoving, isFalse);
       for (var i = 0; i < 20; i++) {
-        expect(e.yOf(i), closeTo(before[i] - 120, 1e-6), reason: '行 $i 整体上移 120px');
+        expect(
+          e.yOf(i),
+          closeTo(before[i] - 120, 1e-6),
+          reason: '行 $i 整体上移 120px',
+        );
       }
     });
 

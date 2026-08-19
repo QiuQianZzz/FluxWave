@@ -56,10 +56,7 @@ class LyricView extends StatefulWidget {
   /// 固定、长度 = `wordFadeWidth × fontSize`。
   final double wordFadeWidth;
 
-  /// 是否启用歌词弹簧动画（行切换时每行独立 posY/scale 弹簧 + 级联延迟）。
-  final bool lyricSpringEnabled;
-
-  /// 歌词弹簧强度档位（仅 [lyricSpringEnabled] 开启时生效）。
+  /// 歌词弹簧强度档位。
   final LyricSpringPreset lyricSpringPreset;
 
   const LyricView({
@@ -74,7 +71,6 @@ class LyricView extends StatefulWidget {
     this.lineLyricRevealMode = LineLyricRevealMode.linearSweep,
     this.lyricDepthBlur = true,
     this.wordFadeWidth = 0.5,
-    this.lyricSpringEnabled = true,
     this.lyricSpringPreset = LyricSpringPreset.standard,
     this.onSeekLine,
     this.onLyricLongPress,
@@ -125,7 +121,7 @@ class _LyricViewState extends State<LyricView>
   int? _lastDotsIndex;
   int _lastDotsDisplayMs = 0;
 
-// ── seek 状态 ──
+  // ── seek 状态 ──
   int _lastReportedTimeMs = 0;
   bool _seekInProgress = false;
 
@@ -193,7 +189,6 @@ class _LyricViewState extends State<LyricView>
     lineHeights: List.filled(widget.lines.length, 0),
     lineStartMs: widget.lines.map((l) => l.startTimeMs).toList(),
     preset: widget.lyricSpringPreset,
-    springEnabled: widget.lyricSpringEnabled,
   );
 
   @override
@@ -230,12 +225,6 @@ class _LyricViewState extends State<LyricView>
       }
       if (old.lyricSpringPreset != widget.lyricSpringPreset) {
         _engine.setPreset(widget.lyricSpringPreset);
-      }
-      if (old.lyricSpringEnabled != widget.lyricSpringEnabled) {
-        // 弹簧/缓动模式是引擎内部状态，切换需重建引擎并重新落位。
-        _engine = _createEngine();
-        _needsJump = true;
-        _lastDotsIndex = null;
       }
       if (old.currentTimeMs != widget.currentTimeMs) {
         _dotsGotPosition = true;
@@ -465,10 +454,9 @@ class _LyricViewState extends State<LyricView>
     final resolvedPlayedSpace = desiredPlayedSpace > minimumVisibleSpace
         ? desiredPlayedSpace
         : minimumVisibleSpace;
-    final effectiveOffset =
-        (resolvedPlayedSpace - _kKeepAliveZone)
-            .clamp(_kMinimumOffset, double.infinity)
-            .toDouble();
+    final effectiveOffset = (resolvedPlayedSpace - _kKeepAliveZone)
+        .clamp(_kMinimumOffset, double.infinity)
+        .toDouble();
     final verticalPad = effectiveOffset + _kKeepAliveZone;
     return (verticalPad / viewportHeight).clamp(0.0, 1.0).toDouble();
   }
@@ -578,7 +566,7 @@ class _LyricViewState extends State<LyricView>
     return level * narrow * _kBlurIntensity;
   }
 
-/// 视口边缘淡出：按行中心与视口顶/底的距离线性淡出到全透明（区间
+  /// 视口边缘淡出：按行中心与视口顶/底的距离线性淡出到全透明（区间
   /// = 半行高 + [_kEdgeFadeLength]），高行（带翻译）不会在仍有一半可
   /// 见时就整行消失。配合外层 [ClipRect] 保证歌词绝不会画到歌词面板
   /// （封面/标题/控件）之外；拖动/浏览期间同样生效。
@@ -608,9 +596,7 @@ class _LyricViewState extends State<LyricView>
           '暂无歌词',
           style: Theme.of(
             context,
-          ).textTheme.bodyMedium?.copyWith(
-            color: widget.inactiveColor,
-          ),
+          ).textTheme.bodyMedium?.copyWith(color: widget.inactiveColor),
         ),
       );
     }
@@ -734,8 +720,7 @@ class _LyricViewState extends State<LyricView>
                 scrolling,
                 dotLineIndex,
               ),
-          if (ready && dotLineIndex != null)
-            _buildDots(dotLineIndex),
+          if (ready && dotLineIndex != null) _buildDots(dotLineIndex),
         ];
 
         return Listener(
@@ -807,18 +792,18 @@ class _LyricViewState extends State<LyricView>
           child: Padding(
             padding: EdgeInsets.only(top: dotsSlotTop),
             child: LyricLineView(
-            line: line,
-            layout: layout,
-            isActive: isActive,
-            currentTimeMs: displayTimeMs,
-            activeColor: widget.activeColor,
-            inactiveColor: widget.inactiveColor,
-            fontSize: widget.fontSize,
-            translationFontSize: widget.fontSize * 0.7,
-            showTranslation: widget.showTranslation,
-            lineLyricRevealMode: widget.lineLyricRevealMode,
-            wordFadeWidth: widget.wordFadeWidth,
-          ),
+              line: line,
+              layout: layout,
+              isActive: isActive,
+              currentTimeMs: displayTimeMs,
+              activeColor: widget.activeColor,
+              inactiveColor: widget.inactiveColor,
+              fontSize: widget.fontSize,
+              translationFontSize: widget.fontSize * 0.7,
+              showTranslation: widget.showTranslation,
+              lineLyricRevealMode: widget.lineLyricRevealMode,
+              wordFadeWidth: widget.wordFadeWidth,
+            ),
           ),
         ),
       ),

@@ -61,7 +61,8 @@ void main() {
     expect(s3.lineLyricRevealMode, LineLyricRevealMode.staticLine);
   });
 
-  test('默认开启歌词景深模糊；切换并持久化', () async {    SharedPreferences.setMockInitialValues({});
+  test('默认开启歌词景深模糊；切换并持久化', () async {
+    SharedPreferences.setMockInitialValues({});
     final s = SettingsProvider();
     expect(s.lyricDepthBlur, isTrue);
 
@@ -119,30 +120,22 @@ void main() {
     expect(s2.fluidFrameRate, FluidFrameRate.low);
   });
 
-  test('歌词弹簧默认开、档位默认标准；切换并持久化', () async {
+  test('歌词弹簧档位默认标准；切换并持久化', () async {
     SharedPreferences.setMockInitialValues({});
     final s = SettingsProvider();
-    expect(s.lyricSpringEnabled, isTrue);
     expect(s.lyricSpringPreset, LyricSpringPreset.standard);
 
     await s.init();
-    expect(s.lyricSpringEnabled, isTrue);
     expect(s.lyricSpringPreset, LyricSpringPreset.standard);
-
-    await s.setLyricSpringEnabled(false);
-    expect(s.lyricSpringEnabled, isFalse);
 
     await s.setLyricSpringPreset(LyricSpringPreset.bouncy);
     expect(s.lyricSpringPreset, LyricSpringPreset.bouncy);
 
     final s2 = SettingsProvider();
     await s2.init();
-    expect(s2.lyricSpringEnabled, isFalse);
     expect(s2.lyricSpringPreset, LyricSpringPreset.bouncy);
 
-    await s2.setLyricSpringEnabled(true);
     await s2.setLyricSpringPreset(LyricSpringPreset.soft);
-    expect(s2.lyricSpringEnabled, isTrue);
     expect(s2.lyricSpringPreset, LyricSpringPreset.soft);
   });
 }

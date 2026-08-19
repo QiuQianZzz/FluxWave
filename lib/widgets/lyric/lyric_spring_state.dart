@@ -13,32 +13,20 @@ class SpringParams {
   final double stiffness;
   final double damping;
 
-  const SpringParams({
-    this.mass = 0.9,
-    this.stiffness = 90,
-    this.damping = 15,
-  });
+  const SpringParams({this.mass = 0.9, this.stiffness = 90, this.damping = 15});
 }
 
-/// 带"延迟目标"的弹簧/缓动状态。
+/// 带"延迟目标"的弹簧状态。
 ///
 /// 与 Flutter 的 [SpringSimulation] 不同：这里保留当前位置与速度，支持
 /// `setTarget(to, delayMs)` 延迟若干毫秒后再启动弹簧，且可动态改参
 /// （换句时按相邻行时间间隔重算 stiffness/damping）——每行
 /// 独立"placement spring"与级联错落的基础。
 ///
-/// - 弹簧模式：阻尼振荡解析解（过阻尼/临界/欠阻尼自动切换），[tick] 每帧
-///   推进；到达 [settleDistance]/[settleVelocity] 容差即吸附到精确目标。
-/// - 缓动模式（[useEase]）：弹簧关闭时的回退，固定时长 easeOutCubic，
-///   同样支持级联延迟。
+/// 阻尼振荡解析解（过阻尼/临界/欠阻尼自动切换），[tick] 每帧推进；
+/// 到达 [settleDistance]/[settleVelocity] 容差即吸附到精确目标。
 class SpringState {
   SpringParams params;
-
-  /// 是否走固定时长缓动（关闭弹簧动画时使用）。
-  final bool useEase;
-
-  /// 缓动时长（毫秒）。
-  final double easeDurationMs;
 
   /// 视为到位的位移容差。
   final double settleDistance;
@@ -60,14 +48,9 @@ class SpringState {
   double _simStartVel = 0;
   double _simT = 0;
 
-  // 缓动起点。
-  double _easeFrom = 0;
-
   SpringState(
     this.params,
     double initial, {
-    this.useEase = false,
-    this.easeDurationMs = 300,
     this.settleDistance = 0.5,
     this.settleVelocity = 10,
   }) : _pos = initial,
@@ -94,7 +77,7 @@ class SpringState {
       _pendingTo = null;
       return;
     }
-    if (!useEase && _pendingTo == null && _settled && (to - _to).abs() < 1e-6) {
+    if (_pendingTo == null && _settled && (to - _to).abs() < 1e-6) {
       return;
     }
     _to = to;
@@ -113,32 +96,13 @@ class SpringState {
       _settled = false;
     }
     if (_settled) return;
-    if (useEase) {
-      _stepEase(dtMs);
-    } else {
-      _stepSpring(dtMs);
-    }
+    _stepSpring(dtMs);
   }
 
   void _startSimulation(double extraMs) {
     _simStartPos = _pos;
     _simStartVel = _vel;
     _simT = extraMs / 1000.0;
-    if (useEase) _easeFrom = _pos;
-  }
-
-  void _stepEase(double dtMs) {
-    _simT += dtMs / 1000.0;
-    final p = (_simT * 1000 / easeDurationMs).clamp(0.0, 1.0);
-    final e = 1 - math.pow(1 - p, 3).toDouble(); // easeOutCubic
-    final next = _easeFrom + (_to - _easeFrom) * e;
-    _vel = (next - _pos) / math.max(1e-4, dtMs / 1000.0);
-    _pos = next;
-    if (p >= 1) {
-      _pos = _to;
-      _vel = 0;
-      _settled = true;
-    }
   }
 
   void _stepSpring(double dtMs) {
@@ -227,9 +191,9 @@ SpringParams computeLinePosYSpringParams({
 }
 
 /// 档位 → 阻尼系数（基准 2.2，标准档贴合原生手感；
-/// bouncy 1.4 ≈ 阻尼比 0.74，欠阻尼可见回弹）。
+/// bouncy 1.1 ≈ 阻尼比 0.58，欠阻尼可见回弹）。
 double _dampingFactor(LyricSpringPreset preset) => switch (preset) {
   LyricSpringPreset.soft => 2.8,
   LyricSpringPreset.standard => 2.2,
-  LyricSpringPreset.bouncy => 1.4,
+  LyricSpringPreset.bouncy => 1.1,
 };

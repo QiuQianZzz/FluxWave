@@ -21,7 +21,6 @@ Widget wrap(
   List<LyricLine> lines,
   int currentTimeMs, {
   LyricSpringPreset preset = LyricSpringPreset.standard,
-  bool springEnabled = true,
 }) => MaterialApp(
   home: Scaffold(
     body: SizedBox(
@@ -33,7 +32,6 @@ Widget wrap(
         activeColor: Colors.white,
         inactiveColor: Colors.black54,
         lyricSpringPreset: preset,
-        lyricSpringEnabled: springEnabled,
       ),
     ),
   ),
@@ -44,14 +42,13 @@ LyricLineVisual visualOf(WidgetTester tester, int index) => tester
     .widgetList<LyricLineVisual>(find.byType(LyricLineVisual))
     .toList()[index];
 
-LyricLineVisual activeVisual(WidgetTester tester) => tester.widget<
-  LyricLineVisual
->(
-  find.ancestor(
-    of: find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
-    matching: find.byType(LyricLineVisual),
-  ),
-);
+LyricLineVisual activeVisual(WidgetTester tester) =>
+    tester.widget<LyricLineVisual>(
+      find.ancestor(
+        of: find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
+        matching: find.byType(LyricLineVisual),
+      ),
+    );
 
 /// 激活行行文本。
 String activeLineText(WidgetTester tester) {
@@ -83,9 +80,7 @@ Future<List<double>> sampleActivePath(
 void main() {
   testWidgets('bouncy 档换句：激活行位置弹簧存在可见过冲（不是单调缓动）', (tester) async {
     final lines = buildLines();
-    await tester.pumpWidget(
-      wrap(lines, 0, preset: LyricSpringPreset.bouncy),
-    );
+    await tester.pumpWidget(wrap(lines, 0, preset: LyricSpringPreset.bouncy));
     await tester.pump();
     await tester.pumpAndSettle();
     // 切句前第 6 行的位置（激活行接下来要从这里弹到锚点）。
@@ -213,7 +208,8 @@ void main() {
       find.byWidgetPredicate((w) => w is LyricLineView && w.isActive),
     );
     final viewportBox = tester.renderObject<RenderBox>(find.byType(LyricView));
-    final top = box.localToGlobal(Offset.zero).dy -
+    final top =
+        box.localToGlobal(Offset.zero).dy -
         viewportBox.localToGlobal(Offset.zero).dy;
     expect(top, inInclusiveRange(60, 220), reason: '远跳后当前行仍应约在第 3 句');
 

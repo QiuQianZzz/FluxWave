@@ -18,14 +18,12 @@ class PlaySection extends StatelessWidget {
 
   /// 各帧率档位的说明文案。
   static String _fluidFrameRateHint(FluidFrameRate rate) => switch (rate) {
-        FluidFrameRate.low =>
-          '约 30fps，最省电、发热最低；流体流动偏慢，日常浏览足够。',
-        FluidFrameRate.balanced =>
-          '约 60fps，省电与流畅兼顾，多数设备推荐。',
-        FluidFrameRate.high =>
-          '不设上限，跟随屏幕刷新率（120Hz 屏约 120fps，60Hz 屏约 60fps）；'
-              '动画最流畅，功耗最高，发热或卡顿可降低档位。',
-      };
+    FluidFrameRate.low => '约 30fps，最省电、发热最低；流体流动偏慢，日常浏览足够。',
+    FluidFrameRate.balanced => '约 60fps，省电与流畅兼顾，多数设备推荐。',
+    FluidFrameRate.high =>
+      '不设上限，跟随屏幕刷新率（120Hz 屏约 120fps，60Hz 屏约 60fps）；'
+          '动画最流畅，功耗最高，发热或卡顿可降低档位。',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -162,85 +160,65 @@ class PlaySection extends StatelessWidget {
               onChanged: (v) => settings.setLyricDepthBlur(v),
             ),
             const Divider(height: 16),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('歌词弹簧动画'),
-              subtitle: Text(
-                '行切换滚动与当前行缩放带轻微回弹（Apple Music 风格）。'
-                '关闭后使用固定时长缓动。',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-              value: settings.lyricSpringEnabled,
-              onChanged: (v) => settings.setLyricSpringEnabled(v),
-            ),
-            if (settings.lyricSpringEnabled)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final narrow = constraints.maxWidth < 440;
-                    final button = SegmentedButton<LyricSpringPreset>(
-                      segments: [
-                        for (final preset in LyricSpringPreset.values)
-                          ButtonSegment(
-                            value: preset,
-                            label: Text(preset.label),
-                          ),
-                      ],
-                      selected: {settings.lyricSpringPreset},
-                      onSelectionChanged: (s) =>
-                          settings.setLyricSpringPreset(s.first),
-                      showSelectedIcon: false,
-                      style: const ButtonStyle(
-                        visualDensity: VisualDensity(
-                          horizontal: -1,
-                          vertical: -1,
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final narrow = constraints.maxWidth < 440;
+                  final button = SegmentedButton<LyricSpringPreset>(
+                    segments: [
+                      for (final preset in LyricSpringPreset.values)
+                        ButtonSegment(value: preset, label: Text(preset.label)),
+                    ],
+                    selected: {settings.lyricSpringPreset},
+                    onSelectionChanged: (s) =>
+                        settings.setLyricSpringPreset(s.first),
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity(
+                        horizontal: -1,
+                        vertical: -1,
+                      ),
+                    ),
+                  );
+                  final label = Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('回弹强度', style: theme.textTheme.bodyMedium),
+                      const SizedBox(height: 2),
+                      Text(
+                        '轻弹接近线性，标准轻微过冲，强弹回弹感最明显。',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
                         ),
                       ),
-                    );
-                    final label = Column(
+                    ],
+                  );
+                  if (narrow) {
+                    return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('回弹强度', style: theme.textTheme.bodyMedium),
-                        const SizedBox(height: 2),
-                        Text(
-                          '轻弹接近线性，标准轻微过冲，强弹回弹感最明显。',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
+                        label,
+                        const SizedBox(height: 8),
+                        Align(alignment: Alignment.centerLeft, child: button),
                       ],
                     );
-                    if (narrow) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          label,
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: button,
-                          ),
-                        ],
-                      );
-                    }
-                    return Row(
-                      children: [
-                        Expanded(flex: 2, child: label),
-                        Expanded(
-                          flex: 3,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: button,
-                          ),
+                  }
+                  return Row(
+                    children: [
+                      Expanded(flex: 2, child: label),
+                      Expanded(
+                        flex: 3,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: button,
                         ),
-                      ],
-                    );
-                  },
-                ),
+                      ),
+                    ],
+                  );
+                },
               ),
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -326,10 +304,7 @@ class PlaySection extends StatelessWidget {
                         children: [
                           label,
                           const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: button,
-                          ),
+                          Align(alignment: Alignment.centerLeft, child: button),
                         ],
                       );
                     }
@@ -511,7 +486,8 @@ class _NotificationPermissionCard extends StatefulWidget {
 }
 
 class _NotificationPermissionCardState
-    extends State<_NotificationPermissionCard> with WidgetsBindingObserver {
+    extends State<_NotificationPermissionCard>
+    with WidgetsBindingObserver {
   bool _granted = false;
   bool _loading = true;
 
@@ -609,9 +585,7 @@ class _NotificationPermissionCardState
             contentPadding: EdgeInsets.zero,
             title: const Text('显示通知栏播放控制'),
             subtitle: Text(
-              _granted
-                  ? '已开启：通知栏和锁屏显示当前播放与控制按钮'
-                  : '未开启：开启后可在通知栏和锁屏控制播放',
+              _granted ? '已开启：通知栏和锁屏显示当前播放与控制按钮' : '未开启：开启后可在通知栏和锁屏控制播放',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: cs.onSurfaceVariant,
               ),

@@ -19,7 +19,6 @@ import 'lyric_spring_state.dart';
 class LyricEngine {
   List<double> lineHeights;
   final List<int> lineStartMs;
-  final bool springEnabled;
 
   /// 非激活行的透明度（指数平滑的目标）。
   final double inactiveAlpha;
@@ -57,7 +56,6 @@ class LyricEngine {
     required this.lineHeights,
     required this.lineStartMs,
     required this.preset,
-    required this.springEnabled,
     this.inactiveAlpha = 0.35,
   }) : _alpha = List.filled(lineCount, 0.0) {
     _posY = List.generate(
@@ -65,8 +63,6 @@ class LyricEngine {
       (_) => SpringState(
         const SpringParams(mass: 0.9, stiffness: 90, damping: 15),
         0,
-        useEase: !springEnabled,
-        easeDurationMs: 340,
         settleDistance: 0.5,
         settleVelocity: 15,
       ),
@@ -76,8 +72,6 @@ class LyricEngine {
       (_) => SpringState(
         const SpringParams(mass: 2, stiffness: 100, damping: 25),
         0.97,
-        useEase: !springEnabled,
-        easeDurationMs: 300,
         settleDistance: 0.0005,
         settleVelocity: 0.01,
       ),
@@ -162,7 +156,10 @@ class LyricEngine {
     for (var i = anchor; i < n; i++) {
       below += lineHeights[i];
     }
-    return (-(above + viewportHeight * alignFraction), below + viewportHeight * (1 - alignFraction));
+    return (
+      -(above + viewportHeight * alignFraction),
+      below + viewportHeight * (1 - alignFraction),
+    );
   }
 
   /// 更新所有行目标并写入各自弹簧（含级联延迟与动态参数）。
