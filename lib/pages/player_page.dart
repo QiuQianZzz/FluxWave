@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/color_readability.dart';
 import '../core/lyric/lyric_model.dart';
 import '../core/lyric/lyric_provider.dart';
 import '../core/platform_utils.dart';
@@ -115,11 +116,13 @@ class _PlayerPageState extends State<PlayerPage>
     final isWide = MediaQuery.sizeOf(context).width >= kWidePlayerBreakpoint;
 
     // 强调色覆盖：封面取色 → 可读性修正 → 作为 primary 注入主题，
-    // 播放按钮/进度条/歌词高亮统一使用。未就绪回退深色主题 primary。
+    // 播放按钮/进度条/歌词高亮统一使用。未就绪回退当前歌曲种子的可读强调色
+    // （与全局动态取色同源，避免首帧出现固定兜底蓝）。
     return ValueListenableBuilder<Color?>(
       valueListenable: FluidBackground.accentColor,
       builder: (context, accent, _) {
-        final resolvedAccent = accent ?? theme.colorScheme.primary;
+final resolvedAccent = accent ??
+            ReadableAccentResolver.resolve(themeProvider.effectiveSeedColor);
         final accentTheme = theme.copyWith(
           colorScheme: theme.colorScheme.copyWith(primary: resolvedAccent),
         );

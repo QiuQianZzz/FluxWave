@@ -29,8 +29,9 @@ class FluidBackground extends StatefulWidget {
   /// shader 支持的最大色板颜色数（uColors[6] 数组）。
   static const int kMaxColors = 6;
 
-  /// 当前封面强调色（经可读性修正，深色背景可用）。由色板稳定后发布，
-  /// 播放页据此渲染控件/歌词强调色（null = 未就绪，回退主题 primary）。
+  /// 当前封面强调色（经可读性修正，深色背景可用）。取色完成即发布，
+  /// 播放页据此渲染控件/歌词强调色（null = 未就绪，播放页回退当前歌曲
+  /// 种子的可读强调色，见 player_page.dart）。
   static final ValueNotifier<Color?> accentColor = ValueNotifier<Color?>(null);
 
   @override
@@ -66,8 +67,9 @@ class _FluidBackgroundState extends State<FluidBackground>
   List<Color> _transitionStart = _fallbackPalette;
   List<Color> _transitionEnd = _fallbackPalette;
   double _paletteTransitionBlend = 1;
-  static const Duration _paletteTransitionDuration =
-      Duration(milliseconds: 400);
+  static const Duration _paletteTransitionDuration = Duration(
+    milliseconds: 400,
+  );
 
   /// 当前实际渲染的色板（含过渡插值）；驱动 painter 重绘。
   final _displayPalette = ValueNotifier<List<Color>>(_fallbackPalette);
@@ -98,19 +100,16 @@ class _FluidBackgroundState extends State<FluidBackground>
     super.initState();
     _ticker = createTicker(_onTick);
     _loadShader();
-    // 首帧后发布兜底色板的强调色，播放页无需等待取色完成。
-    // 延迟到 post-frame：避免父级 build 期间监听者被通知。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _publishAccent(_fallbackPalette);
-    });
+    // 强调色不在此发布兜底色：首帧由播放页回退当前歌曲种子的可读强调色
+    // （player_page.dart），避免任何时刻出现与歌曲无关的固定蓝。
   }
 
   Future<void> _loadShader() async {
     try {
       // 复用全局编译好的程序：首个调用编译，之后所有播放页实例直接复用。
-      final program = await (_programCache ??=
-          ui.FragmentProgram.fromAsset('shaders/fluid.frag'));
+      final program = await (_programCache ??= ui.FragmentProgram.fromAsset(
+        'shaders/fluid.frag',
+      ));
       if (!mounted) return;
       setState(() => _program = program);
       _syncTicker();
@@ -161,6 +160,7 @@ class _FluidBackgroundState extends State<FluidBackground>
 
   /// 推进色板渐变过渡：每帧把 blend 按时长推进一步，
   /// 用插值色板驱动 painter 重绘；完成后固化目标色板。
+  /// 强调色不在这里发布：取色完成时（_loadPalette）已随过渡起始同步发布。
   void _advancePaletteTransition(int deltaUs) {
     if (_paletteTransitionBlend >= 1) return;
     _paletteTransitionBlend +=
@@ -168,10 +168,12 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (_paletteTransitionBlend >= 1) {
       _paletteTransitionBlend = 1;
       _displayPalette.value = List.of(_transitionEnd);
-      _publishAccent(_transitionEnd);
     } else {
-      _displayPalette.value =
-          _lerpPalettes(_transitionStart, _transitionEnd, _paletteTransitionBlend);
+      _displayPalette.value = _lerpPalettes(
+        _transitionStart,
+        _transitionEnd,
+        _paletteTransitionBlend,
+      );
     }
   }
 
@@ -195,8 +197,9 @@ class _FluidBackgroundState extends State<FluidBackground>
       }
     }
     final candidate = best ?? palette.first;
-    FluidBackground.accentColor.value =
-        ReadableAccentResolver.resolve(candidate);
+    FluidBackground.accentColor.value = ReadableAccentResolver.resolve(
+      candidate,
+    );
   }
 
   /// 是否应运行动画：开关开 + 前台 + shader 就绪。
@@ -208,8 +211,7 @@ class _FluidBackgroundState extends State<FluidBackground>
     return TickerMode.of(context);
   }
 
-  SettingsProvider get settingsProvider =>
-      context.read<SettingsProvider>();
+  SettingsProvider get settingsProvider => context.read<SettingsProvider>();
 
   void _syncTicker() {
     if (_shouldAnimate && !_ticker.isActive) {
@@ -229,10 +231,9 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (enabled == _beatEnabled) return;
     _beatEnabled = enabled;
     if (enabled) {
-      _positionSub ??= context
-          .read<PlayerProvider>()
-          .positionStream
-          .listen(_onPosition);
+      _positionSub ??= context.read<PlayerProvider>().positionStream.listen(
+        _onPosition,
+      );
     } else {
       _positionSub?.cancel();
       _positionSub = null;
@@ -292,12 +293,14 @@ class _FluidBackgroundState extends State<FluidBackground>
     final url = _coverUrl();
     final key = _currentSongKey();
     if (url == null) {
-      // 无歌曲/封面：回退兜底色板。仅当状态变化且仍挂载时才重建。
-      if (_palette == null) return;
-      setState(() {
-        _palette = null;
-        _applyPaletteTransition(_fallbackPalette);
-      });
+      // 无歌曲/封面：背景回退兜底色板；强调色回退 null（播放页再回退种子色）。
+      if (_palette != null) {
+        setState(() {
+          _palette = null;
+          _applyPaletteTransition(_fallbackPalette);
+        });
+      }
+      FluidBackground.accentColor.value = null;
       return;
     }
     final colors = await CoverColorExtractor.extractPalette(url, count: 6);
@@ -310,15 +313,16 @@ class _FluidBackgroundState extends State<FluidBackground>
         : colors.map(ReadableAccentResolver.darkenForBackground).toList();
     setState(() {
       _palette = palette;
-      _applyPaletteTransition(
-        palette.isNotEmpty ? palette : _fallbackPalette,
-      );
+      _applyPaletteTransition(palette.isNotEmpty ? palette : _fallbackPalette);
     });
+    // 强调色随真实色板就绪立即发布（与背景过渡同帧，不等 400ms 渐变结束）；
+    // 空色板 → null，由播放页回退种子色。
+    _publishAccent(palette);
   }
 
   /// 设置色板过渡（从当前显示色板渐入 [target]）。
   /// 若动画不可用（背景已启用但处于后台/TickerMode 关闭），过渡无法由
-  /// ticker 推进，直接落到目标色板并发布 accent，避免强调色依赖动画而滞后。
+  /// ticker 推进，直接落到目标色板，避免背景停留在旧色。
   void _applyPaletteTransition(List<Color> target) {
     _transitionStart = _displayPalette.value;
     _transitionEnd = target;
@@ -326,7 +330,6 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (_program != null && !_shouldAnimate) {
       _paletteTransitionBlend = 1;
       _displayPalette.value = List.of(target);
-      _publishAccent(target);
     }
   }
 
@@ -375,9 +378,7 @@ class _FluidBackgroundState extends State<FluidBackground>
     }
     if (program == null) {
       // shader 尚未编译好：只能回退纯色背景。
-      return Container(
-        color: Theme.of(context).colorScheme.surface,
-      );
+      return Container(color: Theme.of(context).colorScheme.surface);
     }
 
     return RepaintBoundary(
