@@ -20,21 +20,39 @@ import '../../widgets/title_bar.dart';
 /// - success：803 成功（展示 nickname + avatar 预览）；
 /// - error：异常/过期，展示重试按钮。
 class QrLoginPage extends StatefulWidget {
-  const QrLoginPage({super.key});
+  const QrLoginPage({super.key, this.qrOverride});
+
+  /// 测试注入点：自定义二维码登录服务（默认用 [NeteaseProvider.api] 构建）。
+  final NeteaseQrLogin? qrOverride;
 
   @override
   State<QrLoginPage> createState() => _QrLoginPageState();
 }
 
-class _QrLoginPageState extends State<QrLoginPage> {
+class _QrLoginPageState extends State<QrLoginPage> with WidgetsBindingObserver {
   NeteaseQrLogin? _qr;
   String? _qrUrl;
+
+  /// 当前轮询的 unikey（退避重排 / 生命周期恢复时复用）。
+  String? _key;
   int _lastCode = 801;
   String? _nickname;
   String? _avatarUrl;
   Object? _lastError;
   Timer? _timer;
   bool _loading = true;
+
+  /// 连续失败次数：决定轮询间隔（指数退避），成功清零。
+  int _consecutiveFailures = 0;
+
+  /// 瞬态网络故障标志：仅弱提示「重试中」，不置终态错误、不清二维码。
+  bool _networkDown = false;
+
+  /// 生命周期挂起标志：退后台停止轮询，回前台立即恢复。
+  bool _pollingPaused = false;
+
+  /// 轮询世代令牌：刷新/暂停时自增，作废在途轮询与旧定时器（防重叠/防陈旧）。
+  int _pollToken = 0;
 
   // 用于安全等待 Provider 初始化（dispose 时清理，防泄漏）
   Completer<void>? _initCompleter;
@@ -44,6 +62,7 @@ class _QrLoginPageState extends State<QrLoginPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _init();
   }
 
@@ -62,7 +81,7 @@ class _QrLoginPageState extends State<QrLoginPage> {
       await _initCompleter!.future;
     }
     if (!mounted) return;
-    _qr = NeteaseQrLogin(provider.api);
+    _qr = widget.qrOverride ?? NeteaseQrLogin(provider.api);
     if (provider.isLoggedIn) {
       setState(() {
         _loading = false;
@@ -81,8 +100,10 @@ class _QrLoginPageState extends State<QrLoginPage> {
     setState(() {
       _loading = true;
       _lastError = null;
+      _networkDown = false;
     });
     _timer?.cancel();
+    _pollToken++;
     String k;
     try {
       k = await qr.newKey();
@@ -95,53 +116,135 @@ class _QrLoginPageState extends State<QrLoginPage> {
       });
       return;
     }
+    if (!mounted) return;
     final url = qr.qrUrl(k);
     setState(() {
+      _key = k;
       _qrUrl = url;
       _lastCode = 801;
       _nickname = null;
       _avatarUrl = null;
       _loading = false;
     });
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      try {
-        final r = await qr.check(k);
-        if (!mounted) return;
-        setState(() {
-          _lastCode = r.code;
-          if (r.nickname != null) _nickname = r.nickname;
-          if (r.avatarUrl != null) _avatarUrl = r.avatarUrl;
-        });
-        if (r.isExpired) {
-          _timer?.cancel();
-          setState(() {
-            _lastError = NeteaseException('二维码已过期', code: 800);
-          });
-        } else if (r.isSuccess) {
-          _timer?.cancel();
-          final prof = await qr.profile();
-          if (!mounted) return;
-          setState(() {
-            _nickname = prof?['nickname']?.toString() ?? _nickname;
-            _avatarUrl = prof?['avatarUrl']?.toString() ?? _avatarUrl;
-          });
-          if (mounted) {
-            context.read<NeteaseProvider>().onLoginSuccess(prof);
-            AppToast.show(context, '登录成功：${_nickname ?? '用户'}');
-            AppLog.info('二维码登录成功：${_nickname ?? '未知用户'}', tag: 'auth');
-          }
-        }
-      } catch (e, st) {
-        if (!mounted) return;
-        AppLog.warn('二维码登录扫码轮询异常', tag: 'auth', error: e, stack: st);
-        setState(() => _lastError = e);
-      }
+    _consecutiveFailures = 0;
+    _pollingPaused = false;
+    _scheduleNext(immediate: true);
+  }
+
+  /// 轮询间隔：连续失败指数退避（2/4/8/16/32s…封顶 30s），成功回 1s 基线。
+  Duration _backoffDelay() {
+    if (_consecutiveFailures <= 0) return const Duration(seconds: 1);
+    final seconds = 1 << _consecutiveFailures;
+    return Duration(seconds: seconds > 30 ? 30 : seconds);
+  }
+
+  /// 安排下一次轮询（可复调：先取消旧定时器，天然防重叠）。
+  void _scheduleNext({bool immediate = false}) {
+    final key = _key;
+    if (key == null) return;
+    _timer?.cancel();
+    final token = _pollToken;
+    _timer = Timer(immediate ? Duration.zero : _backoffDelay(), () {
+      if (!mounted || _pollingPaused || token != _pollToken) return;
+      unawaited(_poll(token));
     });
+  }
+
+  /// 单次轮询扫码状态。失败按「瞬时网络故障」分流：
+  /// - 网络故障 → 退避重试，只弱提示，不置终态错误、不清二维码；
+  /// - 其它异常 → 置终态错误，停止轮询（展示重试按钮）。
+  Future<void> _poll(int token) async {
+    final qr = _qr;
+    final key = _key;
+    if (qr == null || key == null) return;
+    try {
+      final r = await qr.check(key);
+      if (!mounted || token != _pollToken) return;
+      if (_consecutiveFailures > 0) {
+        _consecutiveFailures = 0;
+        AppLog.info('二维码轮询恢复', tag: 'auth');
+      }
+      setState(() {
+        _lastCode = r.code;
+        _networkDown = false;
+        if (r.nickname != null) _nickname = r.nickname;
+        if (r.avatarUrl != null) _avatarUrl = r.avatarUrl;
+      });
+      if (r.isExpired) {
+        _timer?.cancel();
+        setState(() {
+          _lastError = NeteaseException('二维码已过期', code: 800);
+        });
+        return;
+      }
+      if (r.isSuccess) {
+        _timer?.cancel();
+        final prof = await qr.profile();
+        if (!mounted || token != _pollToken) return;
+        setState(() {
+          _nickname = prof?['nickname']?.toString() ?? _nickname;
+          _avatarUrl = prof?['avatarUrl']?.toString() ?? _avatarUrl;
+        });
+        if (mounted) {
+          context.read<NeteaseProvider>().onLoginSuccess(prof);
+          AppToast.show(context, '登录成功：${_nickname ?? '用户'}');
+          AppLog.info('二维码登录成功：${_nickname ?? '未知用户'}', tag: 'auth');
+        }
+        return;
+      }
+      _scheduleNext();
+    } catch (e, st) {
+      if (!mounted || token != _pollToken) return;
+      _consecutiveFailures++;
+      final isNetwork = e is NeteaseException && e.isNetwork;
+      // 日志降噪：只在「进入失败态」记一次 WARN（带栈），持续失败只记 debug。
+      if (_consecutiveFailures == 1) {
+        AppLog.warn('二维码轮询失败', tag: 'auth', error: e, stack: st);
+      } else {
+        AppLog.debug(
+          '二维码轮询第 $_consecutiveFailures 次失败，'
+          '${_backoffDelay().inSeconds}s 后重试',
+          tag: 'auth',
+        );
+      }
+      setState(() {
+        if (isNetwork) {
+          _networkDown = true;
+        } else {
+          _lastError = e;
+        }
+      });
+      if (isNetwork) {
+        _scheduleNext();
+      }
+    }
+  }
+
+  /// 退后台停止轮询（避免断网期间每秒失败刷日志）；回前台立即恢复。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused ||
+          AppLifecycleState.hidden ||
+          AppLifecycleState.detached:
+        _pollingPaused = true;
+        _pollToken++;
+        _timer?.cancel();
+      case AppLifecycleState.resumed:
+        final wasPaused = _pollingPaused;
+        _pollingPaused = false;
+        if (wasPaused && _key != null && _lastError == null && !_loading) {
+          _scheduleNext(immediate: true);
+        }
+      default:
+        break;
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     if (_initListener != null && _waitingProvider != null) {
       _waitingProvider!.removeListener(_initListener!);
     }
@@ -262,21 +365,27 @@ class _QrLoginPageState extends State<QrLoginPage> {
     );
   }
 
-  String get _statusBadge => switch (_lastCode) {
-    801 => '等待扫码',
-    802 => '请在手机上确认',
-    803 => '登录成功',
-    800 => '已过期',
-    _ => '状态 $_lastCode',
-  };
+  String get _statusBadge {
+    if (_networkDown) return '重试中';
+    return switch (_lastCode) {
+      801 => '等待扫码',
+      802 => '请在手机上确认',
+      803 => '登录成功',
+      800 => '已过期',
+      _ => '状态 $_lastCode',
+    };
+  }
 
   Widget _buildStatus(ThemeData theme, ColorScheme cs) {
-    final tip = switch (_lastCode) {
-      803 => '欢迎回来，${_nickname ?? '亲爱的用户'}',
-      802 => _nickname == null ? '请在手机上点击「确认登录」' : '已识别账号：$_nickname，等待确认',
-      800 => '二维码已过期，请点击下方按钮重新获取',
-      _ => '请使用对应音乐 App 扫描上方二维码',
-    };
+    final tip = _networkDown
+        ? '网络连接中，自动重试…'
+        : switch (_lastCode) {
+            803 => '欢迎回来，${_nickname ?? '亲爱的用户'}',
+            802 =>
+              _nickname == null ? '请在手机上点击「确认登录」' : '已识别账号：$_nickname，等待确认',
+            800 => '二维码已过期，请点击下方按钮重新获取',
+            _ => '请使用对应音乐 App 扫描上方二维码',
+          };
     return Column(
       children: [
         Row(
@@ -302,20 +411,26 @@ class _QrLoginPageState extends State<QrLoginPage> {
     );
   }
 
-  IconData get _statusIcon => switch (_lastCode) {
-    801 => Icons.qr_code_scanner_rounded,
-    802 => Icons.check_circle_outline_rounded,
-    803 => Icons.verified_rounded,
-    800 => Icons.refresh_rounded,
-    _ => Icons.info_outline_rounded,
-  };
+  IconData get _statusIcon {
+    if (_networkDown) return Icons.sync_rounded;
+    return switch (_lastCode) {
+      801 => Icons.qr_code_scanner_rounded,
+      802 => Icons.check_circle_outline_rounded,
+      803 => Icons.verified_rounded,
+      800 => Icons.refresh_rounded,
+      _ => Icons.info_outline_rounded,
+    };
+  }
 
-  Color _statusColor(ColorScheme cs) => switch (_lastCode) {
-    803 => cs.primary,
-    802 => cs.tertiary,
-    800 => cs.error,
-    _ => cs.onSurfaceVariant,
-  };
+  Color _statusColor(ColorScheme cs) {
+    if (_networkDown) return cs.tertiary;
+    return switch (_lastCode) {
+      803 => cs.primary,
+      802 => cs.tertiary,
+      800 => cs.error,
+      _ => cs.onSurfaceVariant,
+    };
+  }
 }
 
 /// 803 成功页：头像 + 「登录成功」文案，简约无渐变。
