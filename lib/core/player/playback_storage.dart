@@ -31,6 +31,10 @@ class PlaybackSnapshot {
   /// `0` = 列表循环，`1` = 单曲循环。
   final int loopModeIndex;
 
+  /// 随机播放时的洗牌序（队列下标置换表）。随机模式开启时持久化，以保住跨
+  /// 会话的「下一首」布局；null 或非法（长度不符/越界/重复）时由恢复方重建。
+  final List<int>? shuffleOrder;
+
   const PlaybackSnapshot({
     required this.queue,
     required this.currentIndex,
@@ -38,6 +42,7 @@ class PlaybackSnapshot {
     required this.playing,
     this.shuffleMode = false,
     this.loopModeIndex = 0,
+    this.shuffleOrder,
   });
 
   bool get isEmpty => queue.isEmpty;
@@ -51,16 +56,19 @@ class _DecodedQueue {
   final _QueueFileStatus status;
   final List<Song> queue;
   final int? currentIndex;
-  const _DecodedQueue.ok(this.queue, this.currentIndex)
+  final List<int>? shuffleOrder;
+  const _DecodedQueue.ok(this.queue, this.currentIndex, {this.shuffleOrder})
     : status = _QueueFileStatus.ok;
   const _DecodedQueue.corrupt()
     : status = _QueueFileStatus.corrupt,
       queue = const [],
-      currentIndex = null;
+      currentIndex = null,
+      shuffleOrder = null;
   const _DecodedQueue.unknown()
     : status = _QueueFileStatus.unknownVersion,
       queue = const [],
-      currentIndex = null;
+      currentIndex = null,
+      shuffleOrder = null;
 }
 
 /// 纯函数：在后台 isolate 里读队列文件并解析（顶层函数、无闭包、可 spawn）。
@@ -83,7 +91,18 @@ _DecodedQueue _decodeQueueFile(String path) {
         .whereType<Map<String, dynamic>>()
         .map(Song.fromJson)
         .toList(growable: false);
-    return _DecodedQueue.ok(queue, (decoded['currentIndex'] as num?)?.toInt());
+    final rawOrder = decoded['shuffleOrder'];
+    final shuffleOrder = rawOrder is List
+        ? rawOrder
+              .whereType<num>()
+              .map((e) => e.toInt())
+              .toList(growable: false)
+        : null;
+    return _DecodedQueue.ok(
+      queue,
+      (decoded['currentIndex'] as num?)?.toInt(),
+      shuffleOrder: shuffleOrder,
+    );
   } catch (_) {
     return const _DecodedQueue.corrupt();
   }
@@ -125,7 +144,11 @@ class PlayerPlaybackStorage {
   Future<bool> hasFileQueue() async => _queueFile.exists();
 
   /// 写队列组（大、低频）：空队列直接删文件；否则 temp+rename 原子写。
-  Future<void> saveQueue(List<Song> queue, int? currentIndex) async {
+  Future<void> saveQueue(
+    List<Song> queue,
+    int? currentIndex, {
+    List<int>? shuffleOrder,
+  }) async {
     if (queue.isEmpty) {
       if (await _queueFile.exists()) await _queueFile.delete();
       return;
@@ -136,6 +159,7 @@ class PlayerPlaybackStorage {
         'v': _kQueueSchemaVersion,
         'queue': queue.map((s) => s.toJson()).toList(),
         'currentIndex': currentIndex,
+        'shuffleOrder': ?shuffleOrder,
       });
       await tmp.writeAsString(payload, flush: true);
       if (await _queueFile.exists()) await _queueFile.delete();
@@ -192,6 +216,7 @@ class PlayerPlaybackStorage {
       playing: state.$2,
       shuffleMode: state.$3,
       loopModeIndex: state.$4,
+      shuffleOrder: decoded.shuffleOrder,
     );
   }
 
@@ -233,7 +258,11 @@ class PlayerPlaybackStorage {
 
   /// 一次性写两组（等价于旧版整份快照），供 dispose 兜底与测试使用。
   Future<void> save(PlaybackSnapshot snapshot) async {
-    await saveQueue(snapshot.queue, snapshot.currentIndex);
+    await saveQueue(
+      snapshot.queue,
+      snapshot.currentIndex,
+      shuffleOrder: snapshot.shuffleOrder,
+    );
     await saveState(
       positionMs: snapshot.positionMs,
       playing: snapshot.playing,

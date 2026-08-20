@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:fluxwave/core/player/playback_storage.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:fluxwave/providers/liked_songs_provider.dart';
 import 'package:fluxwave/providers/netease_provider.dart';
@@ -286,6 +287,187 @@ void main() {
       final ids = player.queue.map((s) => '${s.source}:${s.id}').toList();
       // 跨源 kugou:1 保留；同源 netease:1 去重移末尾
       expect(ids, ['kugou:1', 'kugou:2', 'netease:1']);
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+  });
+
+  group('随机模式：队列增删不重排洗牌序，保「下一首」语义', () {
+    testWidgets('playNext：新歌插入当前歌之后成为真正下一首，其余相对顺序不变', (tester) async {
+      final player = await makePlayer();
+      unawaited(player.playAt([song(1), song(2), song(3), song(4)], 1));
+      player.toggleShuffle();
+      final before = player.displayQueue; // [歌2, 其余乱序]
+
+      player.playNext(song(9));
+
+      final view = player.displayQueue;
+      expect(view.first.id, 2, reason: '当前歌仍锚定随机视图首位');
+      expect(view[1].id, 9, reason: '新歌紧跟当前歌，成为下一首');
+      expect(
+        view.sublist(2).map((e) => e.id).toList(),
+        before.sublist(1).map((e) => e.id).toList(),
+        reason: '其余歌曲相对顺序不得被重排',
+      );
+      expect(player.nextSong?.id, 9, reason: '下一首就是刚插入的歌');
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('addToQueue：新歌追加到洗牌序末尾（最后播放）', (tester) async {
+      final player = await makePlayer();
+      unawaited(player.playAt([song(1), song(2), song(3)], 0));
+      player.toggleShuffle();
+      final before = player.displayQueue;
+
+      player.addToQueue(song(9));
+
+      final view = player.displayQueue;
+      expect(view.first.id, 1);
+      expect(view.last.id, 9, reason: '追加的歌在洗牌序末尾');
+      expect(
+        view.sublist(0, view.length - 1).map((e) => e.id).toList(),
+        before.map((e) => e.id).toList(),
+        reason: '原顺序不得被重排',
+      );
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('addAllToQueue：批量追加到洗牌序末尾，且按追加顺序', (tester) async {
+      final player = await makePlayer();
+      unawaited(player.playAt([song(1), song(2), song(3)], 0));
+      player.toggleShuffle();
+      final before = player.displayQueue;
+
+      player.addAllToQueue([song(9), song(8)]);
+
+      final view = player.displayQueue;
+      expect(view.first.id, 1);
+      expect(view[view.length - 2].id, 9);
+      expect(view.last.id, 8, reason: '批量追加按顺序排在洗牌序末尾');
+      expect(
+        view.sublist(0, view.length - 2).map((e) => e.id).toList(),
+        before.map((e) => e.id).toList(),
+        reason: '原顺序不得被重排',
+      );
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('playNext 后再追加：上一首设置仍保持', (tester) async {
+      final player = await makePlayer();
+      unawaited(player.playAt([song(1), song(2), song(3)], 0));
+      player.toggleShuffle();
+
+      player.playNext(song(9));
+      player.addToQueue(song(8)); // 追加不应把 9 洗掉
+
+      final view = player.displayQueue;
+      expect(view.first.id, 1);
+      expect(view[1].id, 9, reason: '追加后「下一首」应保持');
+      expect(view.last.id, 8);
+      expect(player.nextSong?.id, 9);
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('removeAt：只移除该歌，其余相对顺序不变', (tester) async {
+      final player = await makePlayer();
+      unawaited(
+        player.playAt([song(1), song(2), song(3), song(4), song(5)], 0),
+      );
+      player.toggleShuffle();
+      final before = player.displayQueue; // 歌1 锚首
+      final target = before[1];
+
+      unawaited(player.removeAt(player.originalIndexAtDisplay(1)));
+
+      final view = player.displayQueue;
+      expect(view.length, 4);
+      expect(view.first.id, 1);
+      expect(view, isNot(contains(target)));
+      expect(
+        view.map((e) => e.id).toList(),
+        before.where((e) => e.id != target.id).map((e) => e.id).toList(),
+        reason: '移除后剩余歌曲的相对顺序应保持',
+      );
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('playNext 当前播放的歌：空操作，不破坏洗牌序', (tester) async {
+      final player = await makePlayer();
+      unawaited(player.playAt([song(1), song(2), song(3)], 0));
+      player.toggleShuffle();
+      final before = player.displayQueue;
+
+      player.playNext(song(1)); // 目标即当前歌
+
+      expect(
+        player.displayQueue.map((e) => e.id).toList(),
+        before.map((e) => e.id).toList(),
+      );
+      expect(player.queue.length, 3);
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+  });
+
+  group('随机模式：恢复持久化洗牌序', () {
+    Future<PlayerProvider> makeRestorePlayer(
+      PlaybackSnapshot snapshot,
+      WidgetTester tester,
+    ) async {
+      final settings = SettingsProvider();
+      await settings.init();
+      final netease = NeteaseProvider();
+      await netease.init();
+      final player = PlayerProvider(
+        netease: netease,
+        settings: settings,
+        liked: LikedSongsProvider(),
+        networkRetryAttempts: 0,
+        snapshot: snapshot,
+      );
+      player.init();
+      return player;
+    }
+
+    testWidgets('合法洗牌序直接恢复：下一首布局跨会话保留', (tester) async {
+      final player = await makeRestorePlayer(
+        PlaybackSnapshot(
+          queue: [song(1), song(2), song(3), song(4)],
+          currentIndex: 1,
+          positionMs: 0,
+          playing: false,
+          shuffleMode: true,
+          shuffleOrder: const [1, 3, 0, 2],
+        ),
+        tester,
+      );
+
+      expect(player.displayQueue.map((e) => e.id).toList(), [2, 4, 1, 3]);
+      expect(player.displayIndex, 0);
+
+      await tester.pump(const Duration(milliseconds: 400));
+    });
+
+    testWidgets('非法洗牌序（重复下标）回退重建：当前歌锚定视图首位', (tester) async {
+      final player = await makeRestorePlayer(
+        PlaybackSnapshot(
+          queue: [song(1), song(2), song(3), song(4)],
+          currentIndex: 2,
+          positionMs: 0,
+          playing: false,
+          shuffleMode: true,
+          shuffleOrder: const [0, 0, 0, 0],
+        ),
+        tester,
+      );
+
+      expect(player.displayQueue.first.id, 3, reason: '当前歌2 锚定随机视图首位');
+      expect(player.displayIndex, 0);
 
       await tester.pump(const Duration(milliseconds: 400));
     });

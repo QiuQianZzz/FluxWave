@@ -61,8 +61,8 @@ class PlayerProvider extends ChangeNotifier {
     this.networkRetryBaseDelay = const Duration(seconds: 2),
     // 测试可注入 fake 播放器驱动/断言播放态（见 network_retry_test）。
     AudioPlayer Function()? playerFactory,
-  })  : _player = (playerFactory ?? AudioPlayer.new)(),
-        _initialSnapshot = snapshot;
+  }) : _player = (playerFactory ?? AudioPlayer.new)(),
+       _initialSnapshot = snapshot;
 
   final NeteaseProvider netease;
   final SettingsProvider settings;
@@ -656,11 +656,7 @@ class PlayerProvider extends ChangeNotifier {
     // 时间间隔而获得新的尝试额度。
     _streamRecoverStreak++;
     if (_streamRecoverStreak > _streamRecoverMaxAttempts) {
-      AppLog.warn(
-        '播放中断自动恢复次数过多，暂停自动续播：${song.name}',
-        tag: 'player',
-        error: e,
-      );
+      AppLog.warn('播放中断自动恢复次数过多，暂停自动续播：${song.name}', tag: 'player', error: e);
       return;
     }
     AppLog.warn(
@@ -779,7 +775,11 @@ class PlayerProvider extends ChangeNotifier {
     final song = currentSong;
     if (_queueDirty) {
       try {
-        await storage.saveQueue(_queue, _currentIndex);
+        await storage.saveQueue(
+          _queue,
+          _currentIndex,
+          shuffleOrder: _shuffleMode ? _shuffleOrder : null,
+        );
         _queueDirty = false;
       } catch (e) {
         AppLog.error('队列落盘失败', tag: 'player', error: e);
@@ -842,7 +842,14 @@ class PlayerProvider extends ChangeNotifier {
           ? snap.currentIndex!.clamp(0, snap.queue.length - 1)
           : 0;
       if (_shuffleMode) {
-        _rebuildShuffleOrder(anchorIndex: _currentIndex ?? 0);
+        final ci = _currentIndex;
+        final saved = snap.shuffleOrder;
+        if (ci != null && saved != null && _isValidShuffleOrder(saved)) {
+          _shuffleOrder = List<int>.unmodifiable(saved);
+          _shuffleCursor = saved.indexOf(ci);
+        } else {
+          _rebuildShuffleOrder(anchorIndex: ci ?? 0);
+        }
       }
       _isTrial = false;
       _error = null;
@@ -1098,6 +1105,88 @@ class PlayerProvider extends ChangeNotifier {
     _shuffleCursor = 0;
   }
 
+  /// 洗牌序单点移除：[removedIndex] 为旧队列坐标；其余大于它的下标 -1。
+  static List<int> _orderRemove(List<int> order, int removedIndex) {
+    final out = <int>[];
+    for (final i in order) {
+      if (i == removedIndex) continue;
+      out.add(i > removedIndex ? i - 1 : i);
+    }
+    return out;
+  }
+
+  /// 洗牌序单点插入：[insertedIndex] 为新队列坐标；其余大于等于它的下标 +1。
+  /// [at] 为插入位置（缺省 = 末尾追加）。
+  static List<int> _orderInsert(List<int> order, int insertedIndex, {int? at}) {
+    final shifted = [for (final i in order) i >= insertedIndex ? i + 1 : i];
+    final pos = at == null ? shifted.length : at.clamp(0, shifted.length);
+    shifted.insert(pos, insertedIndex);
+    return shifted;
+  }
+
+  /// 校验持久化洗牌序是否可用：必须是对 `0..len-1` 的完整排列。
+  bool _isValidShuffleOrder(List<int> order) {
+    if (order.length != _queue.length) return false;
+    final seen = List<bool>.filled(_queue.length, false);
+    for (final v in order) {
+      if (v < 0 || v >= _queue.length || seen[v]) return false;
+      seen[v] = true;
+    }
+    return seen.every((e) => e);
+  }
+
+  /// 用户主动增删/插队列后按「保留其余相对顺序」维护洗牌序，不做全量重排。
+  ///
+  /// 与 [_syncShuffleOrder]（整体重建）的区别：随机模式下「添加到下一首 / 追加
+  /// 末尾 / 移除」应保留其它歌曲的既有播放顺序，否则刚设好的「下一首」会被
+  /// 重建洗掉。随机关闭或洗牌序缺失时回退到 [_syncShuffleOrder] 语义。
+  ///
+  /// [removedIndex]：被移除项在旧队列的下标（-1 表示无）；
+  /// [insertedIndex]：新插入项在新队列的下标（-1 表示无）；
+  /// [insertAfterCurrent]：true 时插入到当前歌之后（下一首），否则追加到末尾。
+  void _maintainShuffleOrder({
+    int removedIndex = -1,
+    int insertedIndex = -1,
+    bool insertAfterCurrent = false,
+  }) {
+    if (!_shuffleMode) {
+      _shuffleOrder = const [];
+      _shuffleCursor = 0;
+      return;
+    }
+    final current = _currentIndex;
+    if (current == null) {
+      _shuffleOrder = const [];
+      _shuffleCursor = 0;
+      return;
+    }
+    if (_shuffleOrder.isEmpty) {
+      _rebuildShuffleOrder(anchorIndex: current);
+      return;
+    }
+    var order = _shuffleOrder;
+    if (removedIndex >= 0) {
+      order = _orderRemove(order, removedIndex);
+    }
+    if (insertedIndex >= 0) {
+      // 插入点：下一首模式锚定当前歌在（移除后）顺序中的位置，再插入其后。
+      final anchor = insertAfterCurrent ? order.indexOf(current) : -1;
+      order = _orderInsert(
+        order,
+        insertedIndex,
+        at: anchor >= 0 ? anchor + 1 : null,
+      );
+    }
+    final pos = order.indexOf(current);
+    if (pos < 0) {
+      // 防御：不变量保证当前歌必在洗牌序内；万一被破坏，回退整体重建。
+      _rebuildShuffleOrder(anchorIndex: current);
+      return;
+    }
+    _shuffleCursor = pos;
+    _shuffleOrder = List<int>.unmodifiable(order);
+  }
+
   /// 队列增删/换源后同步洗牌顺序，保证「随机播放恒按当前洗牌表推进」。
   void _syncShuffleOrder() {
     if (!_shuffleMode) {
@@ -1192,19 +1281,19 @@ class PlayerProvider extends ChangeNotifier {
       _userPaused = false;
       _skippedSongs = const [];
       _skipStopReason = null;
-      _syncShuffleOrder();
+      _maintainShuffleOrder(removedIndex: index);
       notifyListeners();
       _queueDirty = true;
       _scheduleSave();
       await _loadCurrent();
     } else if (_currentIndex != null && index < _currentIndex!) {
       _currentIndex = _currentIndex! - 1;
-      _syncShuffleOrder();
+      _maintainShuffleOrder(removedIndex: index);
       notifyListeners();
       _queueDirty = true;
       _scheduleSave();
     } else {
-      _syncShuffleOrder();
+      _maintainShuffleOrder(removedIndex: index);
       notifyListeners();
       _queueDirty = true;
       _scheduleSave();
@@ -1268,8 +1357,16 @@ class PlayerProvider extends ChangeNotifier {
       }
     }
     list.add(song);
+    // 移除的是当前播放项：它被移到末尾，currentIndex 跟随到新位置。
+    if (existingIndex == _currentIndex) {
+      _currentIndex = list.length - 1;
+    }
     _queue = List.unmodifiable(list);
-    _syncShuffleOrder();
+    // 随机模式下新歌追加到洗牌序末尾（最后播放），其余顺序不变。
+    _maintainShuffleOrder(
+      removedIndex: existingIndex,
+      insertedIndex: list.length - 1,
+    );
     notifyListeners();
     _queueDirty = true;
     _scheduleSave();
@@ -1280,6 +1377,11 @@ class PlayerProvider extends ChangeNotifier {
   void addAllToQueue(List<Song> songs) {
     if (songs.isEmpty) return;
     final list = List<Song>.from(_queue);
+    // 随机模式下增量维护洗牌序（保留其余相对顺序），关闭/缺失时回退重建。
+    List<int>? order = _shuffleMode && _shuffleOrder.isNotEmpty
+        ? List<int>.from(_shuffleOrder)
+        : null;
+    var currentMoved = false;
     for (final song in songs) {
       final existingIndex = list.indexWhere(
         (s) => s.source == song.source && s.id == song.id,
@@ -1288,12 +1390,30 @@ class PlayerProvider extends ChangeNotifier {
         list.removeAt(existingIndex);
         if (_currentIndex != null && existingIndex < _currentIndex!) {
           _currentIndex = _currentIndex! - 1;
+        } else if (_currentIndex != null && existingIndex == _currentIndex) {
+          currentMoved = true;
         }
+        order = order == null ? null : _orderRemove(order, existingIndex);
       }
       list.add(song);
+      // 移除的是当前播放项：它被追加到末尾，currentIndex 跟随到新位置。
+      if (currentMoved) {
+        _currentIndex = list.length - 1;
+        currentMoved = false;
+      }
+      order = order == null ? null : _orderInsert(order, list.length - 1);
     }
     _queue = List.unmodifiable(list);
-    _syncShuffleOrder();
+    if (order != null) {
+      final current = _currentIndex;
+      if (current != null) {
+        final pos = order.indexOf(current);
+        if (pos >= 0) _shuffleCursor = pos;
+      }
+      _shuffleOrder = List<int>.unmodifiable(order);
+    } else {
+      _syncShuffleOrder();
+    }
     notifyListeners();
     _queueDirty = true;
     _scheduleSave();
@@ -1304,24 +1424,35 @@ class PlayerProvider extends ChangeNotifier {
     final existingIndex = _queue.indexWhere(
       (s) => s.source == song.source && s.id == song.id,
     );
+    // 目标即当前播放项：移除再插回原位是空操作（否则会破坏洗牌序游标）。
+    if (existingIndex >= 0 && existingIndex == _currentIndex) return;
     final insertAt = (_currentIndex ?? -1) + 1;
     final list = List<Song>.from(_queue);
+    int newSongIndex;
     if (existingIndex >= 0) {
       list.removeAt(existingIndex);
       // 移除位置在插入位置之前，需补偿索引
       final adjustedInsertAt = existingIndex < insertAt
           ? insertAt - 1
           : insertAt;
-      list.insert(adjustedInsertAt.clamp(0, list.length), song);
+      newSongIndex = adjustedInsertAt.clamp(0, list.length);
+      list.insert(newSongIndex, song);
       // 若移除的是当前之前的项，currentIndex 已偏移，插入位置正好对齐
       if (_currentIndex != null && existingIndex < _currentIndex!) {
         _currentIndex = _currentIndex! - 1;
       }
     } else {
-      list.insert(insertAt.clamp(0, list.length), song);
+      newSongIndex = insertAt.clamp(0, list.length);
+      list.insert(newSongIndex, song);
     }
     _queue = List.unmodifiable(list);
-    _syncShuffleOrder();
+    // 随机模式下把新歌插到洗牌序的当前歌之后（真正的「下一首」），
+    // 其余歌曲的相对播放顺序保持不变。
+    _maintainShuffleOrder(
+      removedIndex: existingIndex,
+      insertedIndex: newSongIndex,
+      insertAfterCurrent: true,
+    );
     notifyListeners();
     _queueDirty = true;
     _scheduleSave();
@@ -1575,8 +1706,8 @@ class PlayerProvider extends ChangeNotifier {
         }
         // 判定是否为网络类瞬时故障：仅取 URL 请求抛出的 NeteaseException。
         // CDN 播放失败（loadError）属源侧问题，不进网络重试路径。
-        final isNetworkFailure = fetchError is NeteaseException &&
-            fetchError.isNetwork;
+        final isNetworkFailure =
+            fetchError is NeteaseException && fetchError.isNetwork;
         if (isNetworkFailure && networkAttempts < networkRetryAttempts) {
           // 网络请求已失败：首轮立即暂停旧曲，避免退避重试期间（最长可达
           // 十几秒）旧歌仍在播放，造成「UI 已切新歌/加载中、底层还在播旧歌」

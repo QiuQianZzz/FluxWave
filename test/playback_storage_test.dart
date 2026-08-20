@@ -74,6 +74,64 @@ void main() {
     );
   });
 
+  test('shuffleOrder 随队列往返保存', () async {
+    final storage = await makeStorage();
+    await storage.saveQueue(
+      [song(1), song(2), song(3)],
+      1,
+      shuffleOrder: const [1, 2, 0],
+    );
+    final snap = await storage.load();
+    expect(snap, isNotNull);
+    expect(snap!.shuffleOrder, [1, 2, 0]);
+  });
+
+  test('快照 save 往返携带 shuffleOrder', () async {
+    final storage = await makeStorage();
+    await storage.save(
+      PlaybackSnapshot(
+        queue: [song(1), song(2)],
+        currentIndex: 0,
+        positionMs: 100,
+        playing: false,
+        shuffleMode: true,
+        shuffleOrder: const [0, 1],
+      ),
+    );
+    final snap = await storage.load();
+    expect(snap, isNotNull);
+    expect(snap!.shuffleOrder, [0, 1]);
+  });
+
+  test('旧格式队列文件无 shuffleOrder 字段 → 读为 null（恢复方重建）', () async {
+    final storage = await makeStorage();
+    await File('${tempDir.path}/playback_queue.json').writeAsString(
+      jsonEncode({
+        'v': 1,
+        'queue': [song(1).toJson()],
+        'currentIndex': 0,
+      }),
+    );
+    final snap = await storage.load();
+    expect(snap, isNotNull);
+    expect(snap!.shuffleOrder, isNull);
+  });
+
+  test('shuffleOrder 字段含非数字值 → 过滤后保留数字（合法性交给恢复方校验）', () async {
+    final storage = await makeStorage();
+    await File('${tempDir.path}/playback_queue.json').writeAsString(
+      jsonEncode({
+        'v': 1,
+        'queue': [song(1).toJson(), song(2).toJson()],
+        'currentIndex': 0,
+        'shuffleOrder': [0, 'bad'],
+      }),
+    );
+    final snap = await storage.load();
+    expect(snap, isNotNull);
+    expect(snap!.shuffleOrder, [0]);
+  });
+
   test('队列组与状态组分键写入：各自独立', () async {
     final storage = await makeStorage();
 
