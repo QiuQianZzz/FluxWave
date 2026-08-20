@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
@@ -17,6 +18,7 @@ class ThemeProvider extends ChangeNotifier {
   static const _kCustomColors = 'custom_colors'; // JSON list of int
   static const _kPredictiveBack = 'predictive_back';
   static const _kDynamicColor = 'theme_dynamic_color';
+  static const _kCoverSeed = 'last_cover_seed'; // ARGB int，启动恢复用
 
   ThemeMode _themeMode = ThemeMode.system;
   Color _seedColor = const Color(0xFF9C27B0);
@@ -98,6 +100,11 @@ class ThemeProvider extends ChangeNotifier {
       }
       _predictiveBack = prefs.getBool(_kPredictiveBack) ?? true;
       _dynamicColor = prefs.getBool(_kDynamicColor) ?? true;
+      // 恢复上一次封面取色：封面解析完成前主题不回落种子色，避免启动闪色。
+      final coverValue = prefs.getInt(_kCoverSeed);
+      if (coverValue != null) {
+        _coverSeedColor = Color(coverValue);
+      }
     } catch (_) {
       // 使用默认值
     } finally {
@@ -161,19 +168,33 @@ class ThemeProvider extends ChangeNotifier {
   Future<void> setDynamicColor(bool v) async {
     if (_dynamicColor == v) return;
     _dynamicColor = v;
-    if (!v) _coverSeedColor = null;
+    if (!v) {
+      _coverSeedColor = null;
+      unawaited(_saveCoverSeed(null));
+    }
     _invalidateThemes();
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kDynamicColor, v);
   }
 
-  /// 设置当前封面解析出的种子色（不持久化，切换歌曲后由 _CoverSeedWatcher 更新）。
+  /// 设置当前封面解析出的种子色（持久化，切换歌曲后由 _CoverSeedWatcher 更新）。
   void setCoverSeedColor(Color? color) {
     if (_coverSeedColor == color) return;
     _coverSeedColor = color;
     _invalidateThemes();
     notifyListeners();
+    unawaited(_saveCoverSeed(color));
+  }
+
+  /// 持久化最近一次封面取色，供下次启动恢复（null = 清除）。
+  Future<void> _saveCoverSeed(Color? color) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (color == null) {
+      await prefs.remove(_kCoverSeed);
+    } else {
+      await prefs.setInt(_kCoverSeed, color.toARGB32());
+    }
   }
 
   /// 平台字体：桌面端用各自系统 CJK 字体（同时含中英文字形），
