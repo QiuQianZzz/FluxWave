@@ -37,18 +37,18 @@ jobs:
         working-directory: docs
         run: npm run build
 
-      # 静态产物直接交给 Vercel（与主仓库 CI 的 Flutter 构建产物部署方式一致）：
+      # 纯静态产物，直接走 Vercel CLI 三步（pull → build → deploy --prebuilt）：
       # 需要先在 Vercel 创建项目，并在仓库配置三个 Secrets：
       #   VERCEL_TOKEN      个人账户 token（Account → Settings → Tokens）
       #   VERCEL_ORG_ID     vercel org id（本地 vercel link 后取 .vercel/project.json）
       #   VERCEL_PROJECT_ID 同上
       - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
-          vercel-version: latest
-          working-directory: docs/.vitepress/dist
-          github-comment: false
+        working-directory: docs/.vitepress/dist
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npx vercel@latest pull --yes --token=$VERCEL_TOKEN --environment=production
+          npx vercel@latest build --yes --token=$VERCEL_TOKEN
+          npx vercel@latest deploy --prebuilt --prod --yes --token=$VERCEL_TOKEN
