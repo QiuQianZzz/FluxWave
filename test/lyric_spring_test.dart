@@ -1,51 +1,57 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fluxwave/core/lyric/lyric_spring.dart';
+import 'package:fluxwave/widgets/lyric/lyric_spring_state.dart';
+
+/// 阻尼比 = damping / (2·√(stiffness·mass))：>1 过阻尼（无回弹），<1 欠阻尼
+/// （有回弹，越小过冲越大）。
+double _dampingRatio(SpringParams p) =>
+    p.damping / (2 * math.sqrt(p.stiffness * p.mass));
+
+/// 欠阻尼振荡的理论最大过冲比例 ≈ e^(-πζ/√(1-ζ²))。
+double _overshoot(SpringParams p) {
+  final z = _dampingRatio(p);
+  if (z >= 1) return 0;
+  return math.exp(-math.pi * z / math.sqrt(1 - z * z));
+}
 
 void main() {
-  group('LyricSpringPreset 档位排序', () {
-    test('轻弹 < 标准 < 强弹（过冲量递增）', () {
-      final soft = springOvershoot(LyricSpringPreset.soft.spring);
-      final standard = springOvershoot(LyricSpringPreset.standard.spring);
-      final bouncy = springOvershoot(LyricSpringPreset.bouncy.spring);
-      expect(standard, greaterThan(soft));
+  group('computeLinePosYSpringParams 档位物理', () {
+    SpringParams paramsOf(LyricSpringPreset preset) =>
+        computeLinePosYSpringParams(
+          prevStartMs: 0,
+          curStartMs: 3000,
+          preset: preset,
+        );
+
+    test('soft/standard 过阻尼（无回弹），bouncy 欠阻尼（有过冲）', () {
+      expect(_overshoot(paramsOf(LyricSpringPreset.soft)), 0);
+      expect(_overshoot(paramsOf(LyricSpringPreset.standard)), 0);
+      final bouncy = _overshoot(paramsOf(LyricSpringPreset.bouncy));
+      expect(bouncy, greaterThan(0.05), reason: 'bouncy 应有可见回弹');
+      expect(bouncy, lessThan(0.5), reason: '回弹不应过大');
+    });
+
+    test('过冲量排序：soft == standard < bouncy', () {
+      final soft = _overshoot(paramsOf(LyricSpringPreset.soft));
+      final standard = _overshoot(paramsOf(LyricSpringPreset.standard));
+      final bouncy = _overshoot(paramsOf(LyricSpringPreset.bouncy));
+      expect(soft, standard);
       expect(bouncy, greaterThan(standard));
     });
 
-    test('标准档确实存在过冲（不是单调缓动）', () {
-      final over = springOvershoot(LyricSpringPreset.standard.spring);
-      expect(over, greaterThan(0));
-      expect(over, lessThan(0.5));
-    });
-  });
-
-  group('LyricSpring.spring / duration', () {
-    test('名义时长取档位值且随档位单调不减', () {
-      final soft = LyricSpring.duration(LyricSpringPreset.soft);
-      final bouncy = LyricSpring.duration(LyricSpringPreset.bouncy);
-      expect(soft, lessThanOrEqualTo(bouncy));
-      expect(soft.inMilliseconds, greaterThan(200));
-    });
-
-    test('名义时长内曲线已接近目标值（余量交给结束帧吸附）', () {
-      final sim = LyricSpring.spring(
-        LyricSpringPreset.standard.spring,
-        0,
-        1,
+    test('seek 用固定稳定参数（90/15·档位系数），即使 bouncy 也几乎无过冲', () {
+      final p = computeLinePosYSpringParams(
+        prevStartMs: 0,
+        curStartMs: 0,
+        preset: LyricSpringPreset.bouncy,
+        isSeek: true,
       );
-      final end = LyricSpring.duration(LyricSpringPreset.standard);
-      final x = sim.x(end.inMilliseconds / 1000.0);
-      expect((x - 1.0).abs(), lessThan(0.02));
-    });
-
-    test('逆向弹簧（聚焦→非聚焦）在名义时长内接近 0', () {
-      final sim = LyricSpring.spring(
-        LyricSpringPreset.standard.spring,
-        1,
-        0,
-      );
-      final end = LyricSpring.duration(LyricSpringPreset.standard);
-      expect(sim.x(end.inMilliseconds / 1000.0).abs(), lessThan(0.02));
+      expect(p.stiffness, 90);
+      expect(p.damping, closeTo(15 * 1.1, 1e-9));
+      expect(_overshoot(p), lessThan(0.05));
     });
   });
 }

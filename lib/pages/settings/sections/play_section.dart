@@ -215,7 +215,7 @@ class PlaySection extends StatelessWidget {
                       Text('回弹强度', style: theme.textTheme.bodyMedium),
                       const SizedBox(height: 2),
                       Text(
-                        '轻弹接近线性，标准轻微过冲，强弹回弹感最明显。',
+                        '轻弹过渡最柔和，标准平稳顺滑，强弹有明显回弹。',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: cs.onSurfaceVariant,
                         ),

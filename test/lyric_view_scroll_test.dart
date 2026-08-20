@@ -387,6 +387,89 @@ void main() {
     expect(activeVisual(tester).translateY, closeTo(initial, 0.001));
   });
 
+  testWidgets('点空白区（onSeekLine 存在）：不残留锚定，换句照常跟随（修回归）', (tester) async {
+    final lines = buildLines();
+    Widget build() => MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 300,
+          height: 600,
+          child: LyricView(
+            lines: lines,
+            currentTimeMs: 0,
+            activeColor: Colors.white,
+            inactiveColor: Colors.black54,
+            onSeekLine: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpWidget(build());
+    await tester.pumpAndSettle();
+    final initial = activeVisual(tester).translateY;
+
+    // 列表顶部边距（y=8，任何行盒之外）轻点：不命中 InkWell。
+    await tester.tapAt(const Offset(280, 8));
+    await tester.pump();
+
+    // 换句后应照常跟随（heldScrollIndex 不得残留冻结列表）。
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 300,
+            height: 600,
+            child: LyricView(
+              lines: lines,
+              currentTimeMs: 6 * 2000,
+              activeColor: Colors.white,
+              inactiveColor: Colors.black54,
+              onSeekLine: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(activeLineText(tester), 'line 6', reason: '点空白不应冻结跟随');
+    expect(activeVisual(tester).translateY, closeTo(initial, 0.001));
+  });
+
+  testWidgets('点行后位置一次更新越到目标行之后：锁定解除并跟随（修卡死）', (tester) async {
+    final lines = buildLines();
+    Widget build(int currentTimeMs) => MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 300,
+          height: 600,
+          child: LyricView(
+            lines: lines,
+            currentTimeMs: currentTimeMs,
+            activeColor: Colors.white,
+            inactiveColor: Colors.black54,
+            onSeekLine: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpWidget(build(0));
+    await tester.pumpAndSettle();
+
+    // 点击第 5 行（seek 到 10s）：高亮切到 line 5 并进入锁定。
+    final inkwells = find.descendant(
+      of: find.byType(LyricView),
+      matching: find.byType(InkWell),
+    );
+    await tester.tap(inkwells.at(5));
+    await tester.pumpAndSettle();
+    expect(activeLineText(tester), 'line 5');
+
+    // 播放位置一次更新直接越到 line 15（模拟点行后立刻把进度条拖过目标行）。
+    await tester.pumpWidget(build(30 * 1000));
+    await tester.pumpAndSettle();
+    expect(activeLineText(tester), 'line 15', reason: '前跳跨过目标行后应解除锁定并跟随新位置');
+  });
+
   testWidgets('lineLyricRevealMode 参数传入后 painter 同步接收（静态/扫过）', (tester) async {
     for (final mode in LineLyricRevealMode.values) {
       await tester.pumpWidget(

@@ -226,6 +226,33 @@ void main() {
       expect(p.stiffness, 90);
       expect(p.damping, closeTo(15 * 2.8, 1e-9));
     });
+
+    test('首行（无上一句间隔）也应用档位阻尼系数（修忽略档位）', () {
+      final bouncy = makeEngine(preset: LyricSpringPreset.bouncy)
+        ..setViewportHeight(600)
+        ..setAlignFraction(0.2)
+        ..setCurrent(0, force: true);
+      expect(bouncy.posYSpringParamsOf(0).stiffness, 90, reason: '首行用固定稳定刚度');
+      expect(
+        bouncy.posYSpringParamsOf(0).damping,
+        closeTo(15 * 1.1, 1e-9),
+        reason: 'bouncy 首行阻尼按档位系数',
+      );
+
+      final soft = makeEngine(preset: LyricSpringPreset.soft)
+        ..setViewportHeight(600)
+        ..setAlignFraction(0.2)
+        ..setCurrent(0, force: true);
+      expect(
+        soft.posYSpringParamsOf(0).damping,
+        closeTo(15 * 2.8, 1e-9),
+        reason: 'soft 首行阻尼按档位系数',
+      );
+      expect(
+        soft.posYSpringParamsOf(0).damping,
+        greaterThan(bouncy.posYSpringParamsOf(0).damping),
+      );
+    });
   });
 
   group('手动滚动', () {

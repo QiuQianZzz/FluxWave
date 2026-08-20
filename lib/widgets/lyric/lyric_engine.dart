@@ -179,7 +179,14 @@ class LyricEngine {
         isSeek: true,
       );
     } else if (anchor <= 0) {
-      posParams = const SpringParams(stiffness: 90, damping: 15);
+      // 首行无"上一句"间隔：用 seek 的固定稳定参数（含档位阻尼系数），
+      // 保证档位对首行同样生效。
+      posParams = computeLinePosYSpringParams(
+        prevStartMs: 0,
+        curStartMs: 0,
+        preset: preset,
+        isSeek: true,
+      );
     } else {
       posParams = computeLinePosYSpringParams(
         prevStartMs: lineStartMs[anchor - 1],

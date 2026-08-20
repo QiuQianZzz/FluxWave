@@ -155,10 +155,11 @@ class _LyricViewState extends State<LyricView>
   static const _kMinimumOffset = 48.0;
 
   // ── 歌词景深（模糊 + 边缘淡出）──
-  // 模糊按"距当前行的行数"线性增长，上方行比下方多 +1 距离（已播区更糊）；
-  // 窄视口（≤1024）整体 ×0.8；整体强度由 lyricDepthBlurAmount/100 决定
-  // （默认 75 与旧版 ×0.75 一致）。视口顶/底用像素淡出（_edgeFadeOf）溶解，
-  // 配合外层硬裁剪保证不画到面板之外。
+  // 模糊按"距当前行的行数"线性增长且无上限（非视口归一化）：上方行比下方
+  // 多 +1 距离（已播区更糊）；窄视口（≤1024）整体 ×0.8；整体强度由
+  // lyricDepthBlurAmount/100 决定（默认 75 = 距当前行每远 1 行 sigma +0.75，
+  // 当前行恒 0）。视口顶/底用像素淡出（_edgeFadeOf）溶解，配合外层硬裁剪
+  // 保证不画到面板之外。
   static const _kBlurNarrowWidth = 1024.0;
   static const _kBlurNarrowScale = 0.8;
 
@@ -258,9 +259,12 @@ class _LyricViewState extends State<LyricView>
       displayTimeMs,
     );
 
-    // 点击行锁定：音频追上目标行后解除，恢复正常跟踪。
-    if (_tapHoldIndex != null) {
-      if (newIndex == _tapHoldIndex && dt >= 0) {
+    // 点击行锁定：音频追上目标行后解除，恢复正常跟踪。若音频一次更新就
+    // 越到目标行之后（如点行后立刻把进度条拖过该行），也立即解除，避免
+    // 高亮永久停在旧行。
+    final holdIndex = _tapHoldIndex;
+    if (holdIndex != null) {
+      if (newIndex >= holdIndex && dt >= 0) {
         _tapHoldIndex = null;
       } else {
         return;
@@ -396,13 +400,11 @@ class _LyricViewState extends State<LyricView>
       _pointerDragged = false;
       _startUserScrollHold();
     } else if (wasDown) {
-      // 纯轻点：解除按下状态（scrolling true→false，恢复模糊）。
-      // resumeFollow 留给 _handleLineTap 处理（若有 onTapLine），避免在
-      // InkWell onTap 之前重置 heldIndex 导致 seek 失效。
-      if (widget.onSeekLine == null) {
-        _engine.resumeFollow();
-        _scheduleTicks();
-      }
+      // 纯轻点：无论是否命中某一行都解除手动浏览锚定，恢复正常跟随。
+      // 命中行时 _handleLineTap 随后会再次 resumeFollow + setCurrent（幂等），
+      // 不影响 seek；命中空白区则不会残留 heldScrollIndex 冻结列表。
+      _engine.resumeFollow();
+      _scheduleTicks();
       setState(() {});
     }
   }
