@@ -80,9 +80,16 @@ flutter build windows --release # Windows
 
 ## 文档
 
-- [用户指南](docs/USER_GUIDE.md)
-- [开发文档](docs/DEVELOPMENT.md)
-- [加解密实现](docs/netease-crypto.md)
+- [用户指南](docs/guide/index.md)（快速开始、播放音乐、歌词与播放页、收藏与记录、设置、常见问题）
+- [开发文档](docs/development/overview.md)（架构、加解密、测试、贡献指南）
+
+本地预览文档站（VitePress）：
+
+```bash
+cd docs
+npm install
+npm run dev
+```
 
 ## 隐私与数据
 

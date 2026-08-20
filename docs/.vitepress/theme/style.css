@@ -1,0 +1,28 @@
+/*
+ * FluxWave 文档品牌样式
+ *
+ * 品牌色取自动态取色的默认种子 #9C27B0（紫），深浅模式下各有亮暗变体，
+ * 呼应播放页「封面强调色驱动主题」的视觉基因。
+ */
+
+:root {
+  --vp-c-brand-1: #9c27b0;
+  --vp-c-brand-2: #7b1fa2;
+  --vp-c-brand-3: #6a1b9a;
+  --vp-c-brand-soft: rgba(156, 39, 176, 0.14);
+}
+
+.dark {
+  --vp-c-brand-1: #cf6fdd;
+  --vp-c-brand-2: #ab47bc;
+  --vp-c-brand-3: #8e24aa;
+  --vp-c-brand-soft: rgba(207, 111, 221, 0.16);
+}
+
+/* 首页 hero 名称：流体渐变，呼应播放页动态背景 */
+.VPHero .name {
+  background: linear-gradient(120deg, #9c27b0 0%, #7b1fa2 55%, #512da8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
