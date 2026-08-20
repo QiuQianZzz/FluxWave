@@ -17,7 +17,8 @@ import '../providers/settings_provider.dart';
 /// 用自定义 GLSL fragment shader（`shaders/fluid.frag`）渲染"伪流体"：
 /// fbm 噪声 + 域扭曲 + 地形重塑生成流动的等高线场，从当前歌曲封面的
 /// 主色板（[CoverColorExtractor.extractPalette]）查色，得到随封面变化的
-/// 连续渐变流体背景。
+/// 连续渐变流体背景。只负责背景氛围，不参与控件/歌词强调色（强调色由
+/// 播放页按当前歌曲种子色统一推导，见 player_page.dart）。
 ///
 /// - 切歌防抖取色（300ms），最多取 [kMaxColors] 个主色直接作为 uniform
 ///   float 数组传给 shader（不经过纹理采样，兼容 Impeller/mobile GPU）；
@@ -28,11 +29,6 @@ class FluidBackground extends StatefulWidget {
 
   /// shader 支持的最大色板颜色数（uColors[6] 数组）。
   static const int kMaxColors = 6;
-
-  /// 当前封面强调色（经可读性修正，深色背景可用）。取色完成即发布，
-  /// 播放页据此渲染控件/歌词强调色（null = 未就绪，播放页回退当前歌曲
-  /// 种子的可读强调色，见 player_page.dart）。
-  static final ValueNotifier<Color?> accentColor = ValueNotifier<Color?>(null);
 
   @override
   State<FluidBackground> createState() => _FluidBackgroundState();
@@ -160,7 +156,6 @@ class _FluidBackgroundState extends State<FluidBackground>
 
   /// 推进色板渐变过渡：每帧把 blend 按时长推进一步，
   /// 用插值色板驱动 painter 重绘；完成后固化目标色板。
-  /// 强调色不在这里发布：取色完成时（_loadPalette）已随过渡起始同步发布。
   void _advancePaletteTransition(int deltaUs) {
     if (_paletteTransitionBlend >= 1) return;
     _paletteTransitionBlend +=
@@ -175,31 +170,6 @@ class _FluidBackgroundState extends State<FluidBackground>
         _paletteTransitionBlend,
       );
     }
-  }
-
-  /// 从稳定色板挑选强调候选：饱和度最高且明度居中（接近 vibrant），
-  /// 经可读性修正后发布到 [FluidBackground.accentColor]。
-  void _publishAccent(List<Color> palette) {
-    if (palette.isEmpty) {
-      FluidBackground.accentColor.value = null;
-      return;
-    }
-    Color? best;
-    var bestScore = -1.0;
-    for (final c in palette) {
-      final hsl = HSLColor.fromColor(c);
-      // 跳过过暗/过亮（对强调贡献低），饱和度 + 明度居中得分。
-      if (hsl.lightness < 0.18 || hsl.lightness > 0.85) continue;
-      final score = hsl.saturation - (hsl.lightness - 0.5).abs() * 0.6;
-      if (score > bestScore) {
-        bestScore = score;
-        best = c;
-      }
-    }
-    final candidate = best ?? palette.first;
-    FluidBackground.accentColor.value = ReadableAccentResolver.resolve(
-      candidate,
-    );
   }
 
   /// 是否应运行动画：开关开 + 前台 + shader 就绪。
@@ -293,14 +263,13 @@ class _FluidBackgroundState extends State<FluidBackground>
     final url = _coverUrl();
     final key = _currentSongKey();
     if (url == null) {
-      // 无歌曲/封面：背景回退兜底色板；强调色回退 null（播放页再回退种子色）。
+      // 无歌曲/封面：背景回退兜底色板（控件强调色由播放页按种子色回退）。
       if (_palette != null) {
         setState(() {
           _palette = null;
           _applyPaletteTransition(_fallbackPalette);
         });
       }
-      FluidBackground.accentColor.value = null;
       return;
     }
     final colors = await CoverColorExtractor.extractPalette(url, count: 6);
@@ -315,9 +284,6 @@ class _FluidBackgroundState extends State<FluidBackground>
       _palette = palette;
       _applyPaletteTransition(palette.isNotEmpty ? palette : _fallbackPalette);
     });
-    // 强调色随真实色板就绪立即发布（与背景过渡同帧，不等 400ms 渐变结束）；
-    // 空色板 → null，由播放页回退种子色。
-    _publishAccent(palette);
   }
 
   /// 设置色板过渡（从当前显示色板渐入 [target]）。

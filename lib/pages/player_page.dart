@@ -115,152 +115,144 @@ class _PlayerPageState extends State<PlayerPage>
     // 宽屏分栏（≥600）：左侧播放器 + 右侧歌词常驻，去掉滑动切换。
     final isWide = MediaQuery.sizeOf(context).width >= kWidePlayerBreakpoint;
 
-    // 强调色覆盖：封面取色 → 可读性修正 → 作为 primary 注入主题，
-    // 播放按钮/进度条/歌词高亮统一使用。未就绪回退当前歌曲种子的可读强调色
-    // （与全局动态取色同源，避免首帧出现固定兜底蓝）。
-    return ValueListenableBuilder<Color?>(
-      valueListenable: FluidBackground.accentColor,
-      builder: (context, accent, _) {
-final resolvedAccent = accent ??
-            ReadableAccentResolver.resolve(themeProvider.effectiveSeedColor);
-        final accentTheme = theme.copyWith(
-          colorScheme: theme.colorScheme.copyWith(primary: resolvedAccent),
-        );
-        final cs = accentTheme.colorScheme;
-        return Theme(
-          data: accentTheme,
-          child: Scaffold(
-            // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
-            body: Stack(
-              children: [
-                // ── 流体背景（全屏播放页底层，GPU shader，颜色跟随封面） ──
-                const Positioned.fill(child: FluidBackground()),
-                // ── 内容区 ──
-                isWide
-                    ? _buildWideContent(theme, cs, player, song, topPad)
-                    : AnimatedBuilder(
-                        animation: _lyricsTransition,
-                        builder: (context, _) {
-                          final t = _lyricsTransition.value;
-                          return GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onHorizontalDragStart: (d) {
-                              _dragStartValue = _lyricsTransition.value;
-                            },
-                            onHorizontalDragUpdate: (d) {
-                              if (song == null) return;
-                              final width = MediaQuery.sizeOf(context).width;
-                              if (width <= 0) return;
-                              // 放大系数映射（更跟手）：手指移动 = 1.5 倍页面移动，
-                              // 松手后从当前位置补到目标态。
-                              final delta =
-                                  -d.delta.dx / width * _lyricsDragSensitivity;
-                              // AnimatedBuilder 已监听 _lyricsTransition，value 赋值自动触发重建
-                              _lyricsTransition.value =
-                                  (_lyricsTransition.value + delta).clamp(
-                                    0.0,
-                                    1.0,
-                                  );
-                            },
-                            onHorizontalDragEnd: (d) {
-                              // 松手后按"拖动量 + fling 速度"决定最终态（与外部 Tab 逻辑一致）
-                              // drag > 0 = 向左拖（进歌词页），drag < 0 = 向右拖（回播放页）
-                              final v = _lyricsTransition.value;
-                              final velocity = d.primaryVelocity ?? 0;
-                              final drag = v - _dragStartValue;
-                              final absDrag = drag.abs();
-                              // velocity 与 drag 方向相反：向左拖 drag>0 但 velocity<0，
-                              // 传入 shouldComplete 时反转 velocity 使两者同号对齐。
-                              final shouldComplete =
-                                  NavThresholds.shouldComplete(
-                                    dragRatio: absDrag,
-                                    velocity: -velocity,
-                                    drag: drag,
-                                    // 播放页歌词切换用更灵敏的阈值，避免拖太远才切换
-                                    dragDistanceRatio: _lyricsDragDistanceRatio,
-                                  );
-                              if (shouldComplete) {
-                                if (drag > 0) {
-                                  _lyricsTransition.forward();
-                                } else {
-                                  _lyricsTransition.reverse();
-                                }
-                              } else {
-                                // 未达阈值：回弹到最近态
-                                if (v > 0.5) {
-                                  _lyricsTransition.forward();
-                                } else {
-                                  _lyricsTransition.reverse();
-                                }
-                              }
-                              // forward/reverse 会触发 AnimatedBuilder 重建，但顶部栏图标
-                              // 不在 AnimatedBuilder 内，需 setState 触发整树重建
-                              setState(() {});
-                            },
-                            child: song == null
-                                ? const _NoNowPlaying()
-                                : _buildPlaybackContent(
-                                    theme,
-                                    cs,
-                                    player,
-                                    song,
-                                    t,
-                                    topPad,
-                                  ),
-                          );
+    // 强调色覆盖：当前歌曲种子色 → 可读性修正 → 作为 primary 注入主题，
+    // 播放按钮/进度条/歌词高亮统一使用。与全局动态取色同源（无彩色封面
+    // 走中性冷灰，不会把白平衡噪声色相放大成奇怪颜色）。
+    final resolvedAccent = ReadableAccentResolver.resolve(
+      themeProvider.effectiveSeedColor,
+    );
+    final accentTheme = theme.copyWith(
+      colorScheme: theme.colorScheme.copyWith(primary: resolvedAccent),
+    );
+    final cs = accentTheme.colorScheme;
+    return Theme(
+      data: accentTheme,
+      child: Scaffold(
+        // Stack：内容区在底层，顶部栏在上层（透明背景，t=1 时封面移入其位置）
+        body: Stack(
+          children: [
+            // ── 流体背景（全屏播放页底层，GPU shader，颜色跟随封面） ──
+            const Positioned.fill(child: FluidBackground()),
+            // ── 内容区 ──
+            isWide
+                ? _buildWideContent(theme, cs, player, song, topPad)
+                : AnimatedBuilder(
+                    animation: _lyricsTransition,
+                    builder: (context, _) {
+                      final t = _lyricsTransition.value;
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragStart: (d) {
+                          _dragStartValue = _lyricsTransition.value;
                         },
-                      ),
-                // ── 顶部栏（透明背景，在最上层） ──
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: _extraTop(context),
-                      ),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            iconSize: 24,
-                            visualDensity: VisualDensity.compact,
-                            splashRadius: 14,
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                            onPressed: () => Navigator.of(context).pop(),
-                            color: cs.onSurfaceVariant,
-                          ),
-                          const Spacer(),
-                          // 窄屏：队列钮已挪入控制行，右上角仅保留歌词切换。
-                          // 宽屏：歌词常驻右栏，无需歌词切换按钮（右上角留待菜单钮）。
-                          if (song != null && !isWide)
-                            IconButton(
-                              iconSize: 22,
-                              visualDensity: VisualDensity.compact,
-                              splashRadius: 14,
-                              tooltip: _isLyricsMode ? '关闭歌词' : '歌词',
-                              icon: Icon(
-                                _isLyricsMode
-                                    ? Icons.lyrics_rounded
-                                    : Icons.lyrics_outlined,
+                        onHorizontalDragUpdate: (d) {
+                          if (song == null) return;
+                          final width = MediaQuery.sizeOf(context).width;
+                          if (width <= 0) return;
+                          // 放大系数映射（更跟手）：手指移动 = 1.5 倍页面移动，
+                          // 松手后从当前位置补到目标态。
+                          final delta =
+                              -d.delta.dx / width * _lyricsDragSensitivity;
+                          // AnimatedBuilder 已监听 _lyricsTransition，value 赋值自动触发重建
+                          _lyricsTransition.value =
+                              (_lyricsTransition.value + delta).clamp(0.0, 1.0);
+                        },
+                        onHorizontalDragEnd: (d) {
+                          // 松手后按"拖动量 + fling 速度"决定最终态（与外部 Tab 逻辑一致）
+                          // drag > 0 = 向左拖（进歌词页），drag < 0 = 向右拖（回播放页）
+                          final v = _lyricsTransition.value;
+                          final velocity = d.primaryVelocity ?? 0;
+                          final drag = v - _dragStartValue;
+                          final absDrag = drag.abs();
+                          // velocity 与 drag 方向相反：向左拖 drag>0 但 velocity<0，
+                          // 传入 shouldComplete 时反转 velocity 使两者同号对齐。
+                          final shouldComplete = NavThresholds.shouldComplete(
+                            dragRatio: absDrag,
+                            velocity: -velocity,
+                            drag: drag,
+                            // 播放页歌词切换用更灵敏的阈值，避免拖太远才切换
+                            dragDistanceRatio: _lyricsDragDistanceRatio,
+                          );
+                          if (shouldComplete) {
+                            if (drag > 0) {
+                              _lyricsTransition.forward();
+                            } else {
+                              _lyricsTransition.reverse();
+                            }
+                          } else {
+                            // 未达阈值：回弹到最近态
+                            if (v > 0.5) {
+                              _lyricsTransition.forward();
+                            } else {
+                              _lyricsTransition.reverse();
+                            }
+                          }
+                          // forward/reverse 会触发 AnimatedBuilder 重建，但顶部栏图标
+                          // 不在 AnimatedBuilder 内，需 setState 触发整树重建
+                          setState(() {});
+                        },
+                        child: song == null
+                            ? const _NoNowPlaying()
+                            : _buildPlaybackContent(
+                                theme,
+                                cs,
+                                player,
+                                song,
+                                t,
+                                topPad,
                               ),
-                              onPressed: _toggleLyrics,
-                              color: _isLyricsMode
-                                  ? cs.primary
-                                  : cs.onSurfaceVariant,
-                            ),
-                        ],
+                      );
+                    },
+                  ),
+            // ── 顶部栏（透明背景，在最上层） ──
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: _extraTop(context),
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        iconSize: 24,
+                        visualDensity: VisualDensity.compact,
+                        splashRadius: 14,
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        onPressed: () => Navigator.of(context).pop(),
+                        color: cs.onSurfaceVariant,
                       ),
-                    ),
+                      const Spacer(),
+                      // 窄屏：队列钮已挪入控制行，右上角仅保留歌词切换。
+                      // 宽屏：歌词常驻右栏，无需歌词切换按钮（右上角留待菜单钮）。
+                      if (song != null && !isWide)
+                        IconButton(
+                          iconSize: 22,
+                          visualDensity: VisualDensity.compact,
+                          splashRadius: 14,
+                          tooltip: _isLyricsMode ? '关闭歌词' : '歌词',
+                          icon: Icon(
+                            _isLyricsMode
+                                ? Icons.lyrics_rounded
+                                : Icons.lyrics_outlined,
+                          ),
+                          onPressed: _toggleLyrics,
+                          color: _isLyricsMode
+                              ? cs.primary
+                              : cs.onSurfaceVariant,
+                        ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 

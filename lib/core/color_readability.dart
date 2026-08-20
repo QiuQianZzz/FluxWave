@@ -10,6 +10,9 @@ import 'package:flutter/material.dart' show HSLColor;
 /// （播放按钮/进度条/歌词高亮），但强调色直接取封面会与背景或次要文字
 /// 撞色。这里对封面强调候选做可读性检测与提升：
 ///
+/// - **近无彩色输入**（相对色度 [kAchromaticChroma] 以下）：色相基本是
+///   白平衡/解码噪声，不再保留放大，直接返回固定中性冷灰 [kNeutralAccent]
+///   （对齐全局 `ColorScheme.fromSeed` 对低彩度种子生成的淡青观感）；
 /// - 饱和度 ≥ [kMinSaturation]；
 /// - 与背景对比度 ≥ [kMinBackgroundContrast]（深底上保证醒目）；
 /// - 与次要文字（inactive）的色距/亮度差 ≥ 阈值（避免"和文字一样浅"）；
@@ -23,14 +26,23 @@ class ReadableAccentResolver {
   static const double kMinColorDistance = 0.25;
   static const double kMinLuminanceGap = 0.14;
 
+  /// 判定"近无彩色"的相对色度上限（(max-min)/max）。低于此认为色相是
+  /// 白平衡/解码噪声而非真实信号——近白白灰封面的相对色度约 0.02-0.03，
+  /// 而真正的浅色（如浅绿/米色）通常 >0.08，不会被误伤。
+  static const double kAchromaticChroma = 0.04;
+
+  /// 近无彩色封面的中性强调色：固定可读冷灰蓝（深底上醒目、与次要文字
+  /// 可区分），不随白平衡噪声随机变化，观感对齐全局动态取色的淡青。
+  static const Color kNeutralAccent = Color(0xFF6FA3C4);
+
   /// 深色背景（流体近黑底）回退强调色：亮蓝，确保任何封面下可读。
   static const Color kDarkFallback = Color(0xFF8FD8FF);
 
   /// 对 [accent]（封面取色候选）做可读性修正，得到深色背景上可用的强调色。
   ///
   /// [inactiveContentColor] 为页面次要文字色（深色主题的 onSurfaceVariant），
-  /// [backgroundColor] 为背景代表色（默认近黑深蓝底）。可读则原样返回，
-  /// 否则 boost，仍不可读则返回 [kDarkFallback]。
+  /// [backgroundColor] 为背景代表色（默认近黑深蓝底）。近无彩色输入返回
+  /// [kNeutralAccent]；可读则原样返回，否则 boost，仍不可读返回 [kDarkFallback]。
   static Color resolve(
     Color accent, {
     Color? inactiveContentColor,
@@ -38,6 +50,11 @@ class ReadableAccentResolver {
   }) {
     final bg = backgroundColor ?? const Color(0xFF05060A);
     final inactive = inactiveContentColor ?? const Color(0xFFB8C2CC);
+
+    // 近无彩色：色相是噪声，不放大，直接给中性冷灰。
+    if (_relativeChroma(accent) < kAchromaticChroma) {
+      return kNeutralAccent;
+    }
 
     if (isReadable(accent, inactive, bg)) return accent;
 
@@ -65,12 +82,7 @@ class ReadableAccentResolver {
         minLightness + (maxLightness - minLightness) * t.clamp(0.0, 1.0);
     // 同时压饱和：暗底上高饱和会发浊（脏），压到上限保留干净色调。
     final saturation = math.min(hsl.saturation, maxSaturation);
-    return HSLColor.fromAHSL(
-      hsl.alpha,
-      hsl.hue,
-      saturation,
-      target,
-    ).toColor();
+    return HSLColor.fromAHSL(hsl.alpha, hsl.hue, saturation, target).toColor();
   }
 
   /// 可读性检测：饱和度足 + 背景对比度足 + 与 inactive 文字差异足。
@@ -78,9 +90,8 @@ class ReadableAccentResolver {
     final saturation = _hsl(active).saturation;
     final backgroundContrast = _contrastRatio(active, background);
     final colorDistance = _rgbDistance(active, inactive);
-    final luminanceGap = (_relativeLuminance(active) -
-            _relativeLuminance(inactive))
-        .abs();
+    final luminanceGap =
+        (_relativeLuminance(active) - _relativeLuminance(inactive)).abs();
     return saturation >= kMinSaturation &&
         backgroundContrast >= kMinBackgroundContrast &&
         (colorDistance >= kMinColorDistance ||
@@ -108,8 +119,8 @@ class ReadableAccentResolver {
     final saturation = delta == 0
         ? 0.0
         : lightness > 0.5
-            ? delta / (2 - max - min)
-            : delta / (max + min);
+        ? delta / (2 - max - min)
+        : delta / (max + min);
     var hue = 0.0;
     if (delta != 0) {
       if (max == r) {
@@ -131,6 +142,15 @@ class ReadableAccentResolver {
   static double _rgbDistance(Color a, Color b) {
     final dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b;
     return math.sqrt(dr * dr + dg * dg + db * db);
+  }
+
+  /// 相对色度：(max-min)/max，0..1。比 HSL 饱和度对"近白色噪声"更稳健
+  /// （HSL 在接近白色时饱和会被 (2-max-min) 分母夸大）。
+  static double _relativeChroma(Color c) {
+    final r = c.r, g = c.g, b = c.b;
+    final max = math.max(r, math.max(g, b));
+    if (max <= 0) return 0;
+    return (max - math.min(r, math.min(g, b))) / max;
   }
 
   static double _contrastRatio(Color a, Color b) {
@@ -164,7 +184,12 @@ class _HSL {
 
   Color toColor() {
     if (saturation == 0) {
-      return Color.from(alpha: 1, red: lightness, green: lightness, blue: lightness);
+      return Color.from(
+        alpha: 1,
+        red: lightness,
+        green: lightness,
+        blue: lightness,
+      );
     }
     final q = lightness < 0.5
         ? lightness * (1 + saturation)

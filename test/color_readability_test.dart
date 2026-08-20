@@ -53,13 +53,43 @@ void main() {
       expect(out, accent);
     });
 
-    test('过暗/过灰的强调色被提升', () {
-      const muddy = Color(0xFF4A4A4A); // 中灰，深底对比不足
+    test('过暗但带真实色相的强调色被提升', () {
+      const muddy = Color(0xFF5A4030); // 深棕，饱和 0.3，深底对比不足
       final out = ReadableAccentResolver.resolve(muddy);
       expect(out, isNot(equals(muddy)));
       final hsl = HSLColor.fromColor(out);
       expect(hsl.saturation, greaterThanOrEqualTo(0.5));
       expect(hsl.lightness, inInclusiveRange(0.55, 0.80));
+    });
+
+    test('近无彩色（白/灰，色相=噪声）返回固定中性冷灰，不再放大噪声', () {
+      const white = Color(0xFFE8E8E8);
+      const gray = Color(0xFF9E9E9E);
+      const warmWhite = Color(0xFFF7F4F2); // 白平衡偏暖的白灰封面
+      expect(
+        ReadableAccentResolver.resolve(white),
+        ReadableAccentResolver.kNeutralAccent,
+      );
+      expect(
+        ReadableAccentResolver.resolve(gray),
+        ReadableAccentResolver.kNeutralAccent,
+      );
+      // 不放大成浅红/浅橙。
+      final out = ReadableAccentResolver.resolve(warmWhite);
+      expect(out, ReadableAccentResolver.kNeutralAccent);
+      expect(out, isNot(equals(ReadableAccentResolver.kDarkFallback)));
+    });
+
+    test('中性冷灰在深底上可读且与次要文字可区分', () {
+      const active = ReadableAccentResolver.kNeutralAccent;
+      expect(
+        ReadableAccentResolver.isReadable(
+          active,
+          const Color(0xFFB8C2CC),
+          const Color(0xFF05060A),
+        ),
+        isTrue,
+      );
     });
 
     test('极端暗色被提升为深底可读色（而非 fallback）', () {
