@@ -97,9 +97,17 @@ jobs:
             dist/*.exe
 
   build-android:
-    name: Android
+    name: Android (${{ matrix.abi.out }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi:
+          - { target: android-arm, out: armeabi-v7a }
+          - { target: android-arm64, out: arm64-v8a }
+          - { target: android-x64, out: x86_64 }
+          - { target: "", out: universal }
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -152,41 +160,33 @@ jobs:
           mkdir -p app
           echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
 
-      - name: Build split APKs
+      - name: Build APK
         env:
           KEYSTORE_FILE: ${{ github.workspace }}/app/release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: >-
-          flutter build apk --release --split-per-abi
-          --build-name=${{ steps.pubspec.outputs.version_name }}
-          --build-number=${{ steps.pubspec.outputs.build_number }}
-
-      - name: Build universal APK
-        env:
-          KEYSTORE_FILE: ${{ github.workspace }}/app/release.jks
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: >-
-          flutter build apk --release
-          --build-name=${{ steps.pubspec.outputs.version_name }}
-          --build-number=${{ steps.pubspec.outputs.build_number }}
-
-      - name: Rename APKs
         run: |
-          cd build/app/outputs/flutter-apk
-          for f in app-*-release.apk; do
-            abi=$(echo "$f" | sed 's/app-//;s/-release.apk//')
-            mv "$f" "fluxwave-${{ steps.tag.outputs.version }}-android-${abi}.apk"
-          done
-          mv app-release.apk "fluxwave-${{ steps.tag.outputs.version }}-android-universal.apk"
+          set -euo pipefail
+          # 各架构独立 runner 并行构建；universal（target 为空）不带 --target-platform。
+          # 不用 --split-per-abi：它会触发 Flutter 按 ABI 加版本号（5003/6003/8003）。
+          if [ -n "${{ matrix.abi.target }}" ]; then
+            flutter build apk --release \
+              --target-platform=${{ matrix.abi.target }} \
+              --build-name=${{ steps.pubspec.outputs.version_name }} \
+              --build-number=${{ steps.pubspec.outputs.build_number }}
+          else
+            flutter build apk --release \
+              --build-name=${{ steps.pubspec.outputs.version_name }} \
+              --build-number=${{ steps.pubspec.outputs.build_number }}
+          fi
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/fluxwave-${{ steps.tag.outputs.version }}-android-${{ matrix.abi.out }}.apk
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: android
+          name: android-${{ matrix.abi.out }}
           path: build/app/outputs/flutter-apk/fluxwave-*.apk
 
   release:
