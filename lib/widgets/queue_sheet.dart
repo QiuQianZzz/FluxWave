@@ -185,137 +185,182 @@ class _QueueSheetState extends State<QueueSheet> {
 
     // 取 85% 屏幕高度平衡可视区与沉浸感
     final maxHeight = MediaQuery.sizeOf(context).height * 0.85;
+    // 面板底色实时取自当前主题（切歌换封面→主题变→这里重算），保持不透明
+    final sheetColor = Color.alphaBlend(
+      cs.primaryContainer.withValues(alpha: 0.45),
+      cs.surface,
+    );
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: Stack(
-        children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // ── drag handle ──
-              Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 4),
-                child: Container(
-                  width: 32,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: cs.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              // ── 标题区：大标题 + 下方数量，右侧定位当前项 ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 16, 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '播放列表',
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '共 ${queue.length} 首',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (queue.isNotEmpty && currentIndex < queue.length)
-                      _LocateCurrentPill(
-                        position: currentIndex + 1,
-                        onTap: _scrollToCurrent,
-                      ),
-                  ],
-                ),
-              ),
-              Divider(
-                height: 1,
-                color: cs.outlineVariant.withValues(alpha: 0.5),
-              ),
-              // ── 队列列表 ──
-              if (queue.isEmpty)
+    // 底色用 HSL 插值做隐式过渡：切歌换色时绕开 ARGB 线性插值的灰色中点。
+    return TweenAnimationBuilder<Color>(
+      tween: _HslColorTween(begin: sheetColor, end: sheetColor),
+      duration: kThemeAnimationDuration,
+      builder: (context, color, child) =>
+          ColoredBox(color: color, child: child),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Stack(
+          children: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── drag handle ──
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 48),
-                  child: Text(
-                    '播放列表为空',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: cs.onSurfaceVariant,
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Container(
+                    width: 32,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: cs.outlineVariant,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    shrinkWrap: true,
-                    // 固定行高：滚动偏移精确计算（见 _scrollToCurrent 与 _QueueTile）。
-                    itemExtent: _kQueueTileExtent,
-                    // 左右与行间距统一 8，底部留出悬浮按钮空间。
-                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 100),
-                    itemCount: queue.length,
-                    itemBuilder: (context, index) {
-                      final song = queue[index];
-                      final isCurrent = index == currentIndex;
-                      return _QueueTile(
-                        index: index,
-                        song: song,
-                        isCurrent: isCurrent,
-                        isPlaying: isCurrent && player.playing,
-                        onTap: () {
-                          if (!isCurrent) {
-                            player.jumpTo(
-                              _viewShuffled
-                                  ? player.originalIndexAtDisplay(index)
-                                  : index,
-                            );
-                          }
-                        },
-                        onRemove: () => player.removeAt(
-                          _viewShuffled
-                              ? player.originalIndexAtDisplay(index)
-                              : index,
+                ),
+                // ── 标题区：主色图标 + 大标题/数量，右侧定位当前项 ──
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 16, 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // 主色点缀：primaryContainer 圆角方块里的队列图标
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: cs.primaryContainer.withValues(alpha: 0.85),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                      );
-                    },
+                        child: Icon(
+                          Icons.queue_music_rounded,
+                          size: 22,
+                          color: cs.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '播放列表',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '共 ${queue.length} 首',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (queue.isNotEmpty && currentIndex < queue.length)
+                        _LocateCurrentPill(
+                          position: currentIndex + 1,
+                          onTap: _scrollToCurrent,
+                        ),
+                    ],
                   ),
                 ),
-            ],
-          ),
-          // ── 右下角悬浮按钮：收纳低频操作 ──
-          if (queue.isNotEmpty)
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: _QuickActionsFab(
-                canClear: queue.isNotEmpty,
-                shuffleMode: player.shuffleMode,
-                viewShuffled: _viewShuffled,
-                onClear: () => _confirmClear(player),
-                onToggleView: _toggleView,
-              ),
+                Divider(
+                  height: 1,
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                ),
+                // ── 队列列表 ──
+                if (queue.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 48),
+                    child: Text(
+                      '播放列表为空',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      shrinkWrap: true,
+                      // 固定行高：滚动偏移精确计算（见 _scrollToCurrent 与 _QueueTile）。
+                      itemExtent: _kQueueTileExtent,
+                      // 左右与行间距统一 8，底部留出悬浮按钮空间。
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 100),
+                      itemCount: queue.length,
+                      itemBuilder: (context, index) {
+                        final song = queue[index];
+                        final isCurrent = index == currentIndex;
+                        return _QueueTile(
+                          index: index,
+                          song: song,
+                          isCurrent: isCurrent,
+                          isPlaying: isCurrent && player.playing,
+                          onTap: () {
+                            if (!isCurrent) {
+                              player.jumpTo(
+                                _viewShuffled
+                                    ? player.originalIndexAtDisplay(index)
+                                    : index,
+                              );
+                            }
+                          },
+                          onRemove: () => player.removeAt(
+                            _viewShuffled
+                                ? player.originalIndexAtDisplay(index)
+                                : index,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
             ),
-        ],
+            // ── 右下角悬浮按钮：收纳低频操作 ──
+            if (queue.isNotEmpty)
+              Positioned(
+                right: 16,
+                bottom: 16,
+                child: _QuickActionsFab(
+                  canClear: queue.isNotEmpty,
+                  shuffleMode: player.shuffleMode,
+                  viewShuffled: _viewShuffled,
+                  onClear: () => _confirmClear(player),
+                  onToggleView: _toggleView,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 }
 
+/// 用 HSL 空间做颜色插值，绕开 ARGB 线性插值跨色相时的灰色中点，
+/// 供面板底色在切歌换主题色时平滑旋转色相。
+class _HslColorTween extends Tween<Color> {
+  _HslColorTween({super.begin, super.end});
+
+  @override
+  Color lerp(double t) {
+    if (t == 0.0) return begin!;
+    if (t == 1.0) return end!;
+    return HSLColor.lerp(
+      HSLColor.fromColor(begin!),
+      HSLColor.fromColor(end!),
+      t,
+    )!.toColor();
+  }
+}
+
 /// 队列中的单曲项。
 ///
-/// 行首展示序号（当前视图下的位置）；当前播放项以 `primaryContainer` 底色
-/// （alpha 0.45）高亮，并在行尾显示播放/暂停指示图标，封面保持干净。
+/// 行首展示序号（当前视图下的位置）；当前播放项以实心 `primaryContainer`
+/// 底色高亮、序号加粗着 `onPrimaryContainer`，行尾显示播放/暂停指示图标，
+/// 封面保持干净。
 class _QueueTile extends StatelessWidget {
   final int index;
   final Song song;
@@ -337,13 +382,14 @@ class _QueueTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    // 当前项 primaryContainer 高亮，其余行以浅灰底区分层次
+    // 当前项实心 primaryContainer；其余行浅灰底卡片
     final tileColor = isCurrent
-        ? cs.primaryContainer.withValues(alpha: 0.45)
+        ? cs.primaryContainer.withValues(alpha: 0.85)
         : cs.surfaceContainerHighest.withValues(alpha: 0.45);
-    final titleColor = isCurrent ? cs.primary : cs.onSurface;
+    // 当前行文字用 onPrimaryContainer 保证在实心底上的对比度
+    final titleColor = isCurrent ? cs.onPrimaryContainer : cs.onSurface;
     final subtitleColor = isCurrent
-        ? cs.primary.withValues(alpha: 0.8)
+        ? cs.onPrimaryContainer.withValues(alpha: 0.8)
         : cs.onSurfaceVariant;
 
     return Padding(
@@ -361,18 +407,21 @@ class _QueueTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  // ── 行首序号 ──
+                  // ── 行首序号：当前项加粗用 onPrimaryContainer（实心底上对比度足够） ──
                   SizedBox(
                     width: 36,
-                    child: Text(
-                      '${index + 1}',
-                      maxLines: 1,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: isCurrent ? cs.primary : cs.onSurfaceVariant,
-                        fontWeight: isCurrent
-                            ? FontWeight.w700
-                            : FontWeight.w500,
+                    child: Center(
+                      child: Text(
+                        '${index + 1}',
+                        maxLines: 1,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: isCurrent
+                              ? cs.onPrimaryContainer
+                              : cs.onSurfaceVariant,
+                          fontWeight: isCurrent
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
                       ),
                     ),
                   ),
@@ -439,7 +488,7 @@ class _QueueTile extends StatelessWidget {
                           ? Icons.graphic_eq_rounded
                           : Icons.pause_rounded,
                       size: 20,
-                      color: cs.primary,
+                      color: cs.onPrimaryContainer,
                     ),
                   ],
                   // ── 删除按钮 ──
