@@ -1,0 +1,54 @@
+name: Deploy Docs to Vercel
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Build site
+        working-directory: docs
+        run: npm run build
+
+      # 静态产物直接交给 Vercel（与主仓库 CI 的 Flutter 构建产物部署方式一致）：
+      # 需要先在 Vercel 创建项目，并在仓库配置三个 Secrets：
+      #   VERCEL_TOKEN      个人账户 token（Account → Settings → Tokens）
+      #   VERCEL_ORG_ID     vercel org id（本地 vercel link 后取 .vercel/project.json）
+      #   VERCEL_PROJECT_ID 同上
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          vercel-version: latest
+          working-directory: docs/.vitepress/dist
+          github-comment: false
