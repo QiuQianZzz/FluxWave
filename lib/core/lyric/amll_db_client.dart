@@ -25,7 +25,7 @@ class AmllDbClient {
   static Future<String?> fetchTtml({
     required int songId,
     String? baseUrl,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 3),
   }) async {
     final sources = baseUrl != null ? [baseUrl, ...mirrors] : mirrors;
     for (final base in sources) {
