@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 
 import '../audio_cache/lyrics_cache.dart';
 import '../netease/netease_api.dart';
+import 'amll_db_client.dart';
 import 'lyric_model.dart';
 import 'lyric_parser.dart';
+import 'ttml_parser.dart';
 
 /// 歌词加载编排。
 ///
@@ -43,20 +45,25 @@ class LyricProvider {
   /// 加载歌词。命中缓存立即返回；并发请求同一 songId 时共享同一个 Future。
   ///
   /// [songKey] 可选（`<source>_<songId>`），传入时启用磁盘缓存。
+  /// [enableTtml] 控制是否尝试 AMLL DB TTML 逐字歌词（默认 true）。
   ///
   /// 缓存策略（断网失败结果不缓存，可重试）：
   /// - 成功：非空歌词 → 缓存；
   /// - 确定性无歌词（code==200 但无文本）→ 缓存空哨兵，命中直接返回空，
   ///   避免对无歌词歌曲每次播放都重新请求；
   /// - 失败（网络/接口异常、code != 200）→ 返回空但不缓存，重试重新请求。
-  Future<List<LyricLine>> load(int songId, {String? songKey}) async {
+  Future<List<LyricLine>> load(
+    int songId, {
+    String? songKey,
+    bool enableTtml = true,
+  }) async {
     final cached = _cache[songId];
     if (cached != null) return cached;
 
     final pending = _loading[songId];
     if (pending != null) return pending;
 
-    final fut = _fetchAndParse(songId, songKey: songKey);
+    final fut = _fetchAndParse(songId, songKey: songKey, enableTtml: enableTtml);
     _loading[songId] = fut;
     try {
       final lines = await fut;
@@ -88,6 +95,7 @@ class LyricProvider {
   Future<List<LyricLine>> _fetchAndParse(
     int songId, {
     String? songKey,
+    bool enableTtml = true,
   }) async {
     // 1. 尝试磁盘缓存（原始文本）。磁盘读取失败不视为歌词失败，回退网络。
     if (songKey != null) {
@@ -100,7 +108,34 @@ class LyricProvider {
       } catch (_) {}
     }
 
-    // 2. 网络加载。网络/接口异常向上抛出：不缓存失败结果，调用方据此区分
+    // 2. 尝试 AMLL DB TTML（逐字级别最高质量），需开关开启。
+    if (enableTtml) {
+      try {
+        final ttmlContent = await AmllDbClient.fetchTtml(songId: songId);
+        if (ttmlContent != null && ttmlContent.isNotEmpty) {
+          final sanitized = TtmlParser.sanitize(ttmlContent);
+          final cleaned = TtmlParser.cleanTranslations(sanitized);
+          final lines = LyricParser.parseTtml(cleaned);
+          if (lines.isEmpty) {
+            // 清洗后解析失败，尝试直接解析 sanitized 内容
+            final rawLines = LyricParser.parseTtml(sanitized);
+            if (rawLines.isNotEmpty) {
+              if (songKey != null) {
+                LyricsCache.instance.write(songKey, ttmlContent);
+              }
+              return rawLines;
+            }
+          } else {
+            if (songKey != null) {
+              LyricsCache.instance.write(songKey, ttmlContent);
+            }
+            return lines;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. 网络加载（Netease）。网络/接口异常向上抛出：不缓存失败结果，调用方据此区分
     //    「加载失败」（可重试）与「真没有歌词」（返回空列表，成功语义）。
     final body = await _fetchLyric(songId);
     if (body['code'] != 200) return const [];
@@ -144,7 +179,7 @@ class LyricProvider {
       );
     }
 
-    // 3. 写入磁盘缓存（原始文本，不含翻译/罗马音对齐后的结构）
+    // 4. 写入磁盘缓存（原始文本，不含翻译/罗马音对齐后的结构）
     if (songKey != null && mainText.isNotEmpty) {
       LyricsCache.instance.write(songKey, mainText);
     }

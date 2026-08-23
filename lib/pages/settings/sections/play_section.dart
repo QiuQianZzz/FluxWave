@@ -129,6 +129,20 @@ class PlaySection extends StatelessWidget {
           icon: Icons.lyrics_outlined,
           title: '歌词显示',
           children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('AMLL DB 逐字歌词'),
+              subtitle: Text(
+                '开启后优先从 AMLL DB 获取 TTML 逐字歌词（Apple Music 级别质量），'
+                '关闭则仅使用网易云自带歌词。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              value: settings.enableAmllDb,
+              onChanged: (v) => settings.setEnableAmllDb(v),
+            ),
+            const Divider(height: 16),
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(

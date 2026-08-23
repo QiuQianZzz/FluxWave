@@ -1,4 +1,5 @@
 import 'lyric_model.dart';
+import 'ttml_parser.dart';
 
 /// 歌词解析器。
 ///
@@ -135,11 +136,37 @@ class LyricParser {
     return out;
   }
 
+  // ── TTML 逐字解析 ────────────────────────────────────────
+
+  /// 检测是否为 TTML 格式。
+  static bool isTtml(String content) {
+    final trimmed = content.trim();
+    return trimmed.startsWith('<tt') ||
+        trimmed.contains('xmlns="http://www.w3.org/ns/ttml"');
+  }
+
+  /// 解析 TTML 逐字文本为 [LyricLine] 列表。
+  static List<LyricLine> parseTtml(String ttmlContent) {
+    if (ttmlContent.isEmpty) return const [];
+    try {
+      return TtmlParser.parse(ttmlContent);
+    } catch (_) {
+      return const [];
+    }
+  }
+
   // ── 自动分发 ───────────────────────────────────────────────
 
   /// 自动识别格式并解析。
   static List<LyricLine> parseAuto(String content) {
     if (content.isEmpty) return const [];
+    if (isTtml(content)) {
+      try {
+        return parseTtml(content);
+      } catch (_) {
+        return const [];
+      }
+    }
     if (isYrc(content)) return parseYrc(content);
     return parseLrc(content);
   }

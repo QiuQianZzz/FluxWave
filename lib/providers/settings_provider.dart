@@ -45,6 +45,7 @@ class SettingsProvider extends ChangeNotifier {
   static const _kFluidBackground = 'fluid_background';
   static const _kFluidBeat = 'fluid_beat';
   static const _kFluidFrameRate = 'fluid_frame_rate';
+  static const _kEnableAmllDb = 'enable_amll_db';
 
   /// 音质档位表（值 = 网易云 song/url v1 的 level 参数，label = 展示名）。
   /// 标准→较高→...→超清母带。
@@ -119,6 +120,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 流体背景动画帧率档位。默认均衡（60fps）。
   FluidFrameRate _fluidFrameRate = FluidFrameRate.balanced;
 
+  /// AMLL DB 逐字歌词（TTML）。默认开启。
+  bool _enableAmllDb = true;
+
   bool get initialized => _initialized;
 
   /// 触感反馈开关（tab 切换等交互触发震动），默认开。
@@ -179,6 +183,9 @@ class SettingsProvider extends ChangeNotifier {
   /// 流体背景动画帧率档位。
   FluidFrameRate get fluidFrameRate => _fluidFrameRate;
 
+  /// AMLL DB 逐字歌词开关。
+  bool get enableAmllDb => _enableAmllDb;
+
   /// 生效的 IP 注入开关：Android 硬门控（永不自动注入）。
   /// 显式 [NeteaseRequestContext.realIp] 仍恒生效（开发者/调试意图，不受此门控）。
   bool get realIpInjectionEnabled => _neteaseRealIp && !isAndroid;
@@ -234,6 +241,7 @@ class SettingsProvider extends ChangeNotifier {
         (e) => e.name == prefs.getString(_kFluidFrameRate),
         orElse: () => FluidFrameRate.balanced,
       );
+      _enableAmllDb = prefs.getBool(_kEnableAmllDb) ?? true;
     } catch (_) {
       // 读取失败使用默认值
     }
@@ -400,6 +408,15 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kFluidFrameRate, v.name);
+  }
+
+  /// AMLL DB 逐字歌词开关（持久化）。
+  Future<void> setEnableAmllDb(bool v) async {
+    if (v == _enableAmllDb) return;
+    _enableAmllDb = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kEnableAmllDb, v);
   }
 
   /// 桌面图标 id（持久化）。仅记录用户选择；实际调用 LauncherIconSwitcher

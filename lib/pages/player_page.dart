@@ -917,7 +917,12 @@ class _LyricPanelState extends State<_LyricPanel> {
     setState(() => _loading = true);
     try {
       final provider = _provider ??= LyricProvider(netease.api);
-      final lines = await provider.load(widget.songId, songKey: widget.songKey);
+      final enableTtml = context.read<SettingsProvider>().enableAmllDb;
+      final lines = await provider.load(
+        widget.songId,
+        songKey: widget.songKey,
+        enableTtml: enableTtml,
+      );
       if (mounted) {
         setState(() {
           _lines = lines;

@@ -39,6 +39,12 @@ class LyricLine {
   /// 罗马音歌词（时间戳对齐后填入）。
   final String? roman;
 
+  /// 背景人声行（TTML 专有，暂不渲染）。
+  final bool isBG;
+
+  /// 合唱标记（TTML 专有）。
+  final bool isDuet;
+
   const LyricLine({
     required this.text,
     required this.startTimeMs,
@@ -46,12 +52,14 @@ class LyricLine {
     this.words,
     this.translation,
     this.roman,
+    this.isBG = false,
+    this.isDuet = false,
   });
 
   /// 是否逐字。
   bool get isWordLevel => words != null && words!.isNotEmpty;
 
-  LyricLine copyWith({String? translation, String? roman}) {
+  LyricLine copyWith({String? translation, String? roman, bool? isBG, bool? isDuet}) {
     return LyricLine(
       text: text,
       startTimeMs: startTimeMs,
@@ -59,6 +67,8 @@ class LyricLine {
       words: words,
       translation: translation ?? this.translation,
       roman: roman ?? this.roman,
+      isBG: isBG ?? this.isBG,
+      isDuet: isDuet ?? this.isDuet,
     );
   }
 }
