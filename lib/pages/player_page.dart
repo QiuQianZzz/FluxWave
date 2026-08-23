@@ -878,12 +878,15 @@ class _LyricPanel extends StatefulWidget {
 }
 
 class _LyricPanelState extends State<_LyricPanel> {
-  /// 每个 State 独立的 LyricProvider（避免 static 共享导致缓存跨实例污染）。
-  LyricProvider? _provider;
+  /// 进程级 LyricProvider 单例（内存缓存跨路由复用，避免每次打开播放页重新加载）。
+  static LyricProvider? _provider;
 
   List<LyricLine> _lines = const [];
   bool _loading = true;
   bool _enableAmllDb = true;
+  /// 上次 _loadLyrics 使用的 enableTtml 值（static 跨 State 实例保持），
+  /// 用于检测开关变化后跳过内存缓存。
+  static bool? _lastLoadEnableTtml;
   SettingsProvider? _settings;
 
   @override
@@ -938,6 +941,12 @@ class _LyricPanelState extends State<_LyricPanel> {
     try {
       final provider = _provider ??= LyricProvider(netease.api);
       final enableTtml = context.read<SettingsProvider>().enableAmllDb;
+      // 开关变化后跳过内存缓存（initState 先于 didChangeDependencies 执行，
+      // 内存缓存可能仍是旧开关值对应的结果）。
+      if (_lastLoadEnableTtml != null && _lastLoadEnableTtml != enableTtml) {
+        provider.invalidate(widget.songId);
+      }
+      _lastLoadEnableTtml = enableTtml;
       final lines = await provider.load(
         widget.songId,
         songKey: widget.songKey,

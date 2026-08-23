@@ -21,6 +21,7 @@ class AmllDbClient {
   /// 按 songId 直接下载 TTML 歌词。
   ///
   /// 依次尝试 [mirrors] 中的镜像源，首个返回 200 且内容非空的即返回。
+  /// 遇到 404 立即终止（所有镜像共享同一数据库，404 意味着确定无歌词）。
   /// 全部失败返回 null。
   static Future<String?> fetchTtml({
     required int songId,
@@ -30,11 +31,14 @@ class AmllDbClient {
     final sources = baseUrl != null ? [baseUrl, ...mirrors] : mirrors;
     for (final base in sources) {
       final result = await _fetchFromMirror(base, songId, timeout);
+      if (result == _notFound) return null;
       if (result != null) return result;
     }
     return null;
   }
 
+  /// 返回 [_notFound] 表示确定无歌词（404），调用方应终止所有镜像尝试。
+  /// 返回 null 表示该镜像失败（超时、非 200 等），应尝试下一个。
   static Future<String?> _fetchFromMirror(
     String base,
     int songId,
@@ -46,6 +50,7 @@ class AmllDbClient {
       client = HttpClient()..connectionTimeout = timeout;
       final request = await client.getUrl(Uri.parse(url));
       final response = await request.close().timeout(timeout);
+      if (response.statusCode == 404) return _notFound;
       if (response.statusCode == 200) {
         final content = await response.transform(utf8.decoder).join();
         if (content.trim().isEmpty) return null;
@@ -58,4 +63,7 @@ class AmllDbClient {
       client?.close();
     }
   }
+
+  /// 404 哨兵：所有镜像共享同一数据库，一个 404 即确定无歌词。
+  static const _notFound = '##NOT_FOUND##';
 }
