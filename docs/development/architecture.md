@@ -30,8 +30,9 @@
 
 ## 歌词系统
 
-- 支持 LRC（逐行）、YRC（逐字）、NRC（逐字）三种格式
-- `LyricProvider`：歌词加载编排，进程内 LRU 缓存（40 首）
+- 支持 LRC（逐行）、YRC（逐字）、NRC（逐字）、TTML（逐字）四种格式
+- `LyricProvider`：歌词加载编排，三级缓存策略（进程内 LRU 40 首 → 磁盘 → 网络），磁盘缓存按格式分离（`lyrics.txt` / `lyrics_ttml.txt`）
+- TTML 歌词源：`AmllDbClient` 多镜像源自动降级，`TtmlParser` 解析 Apple Music TTML 格式，支持背景人声（x-bg）、BCP 47 语言标签翻译选择
 - `LyricView`：Canvas 逐帧绘制，支持卡拉 OK 渐变高亮、前奏/间奏呼吸圆点
 - Apple Music 风格弹簧滚动动画（`lyric_spring.dart`）：行间切换带弹性缓动，圆点动画带锚定逻辑；景深模糊强度可在设置中调节
 
