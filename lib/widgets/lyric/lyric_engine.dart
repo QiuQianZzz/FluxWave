@@ -137,7 +137,9 @@ class LyricEngine {
   }
 
   /// 手动浏览结束后恢复跟随：对齐回当前行并归零浏览偏移（用弹簧弹回，保留错落）。
+  /// 幂等：已在跟随状态时跳过 _recomputeTargets，避免重复调用中断弹簧动画。
   void resumeFollow() {
+    if (heldScrollIndex == null && userScrollOffset == 0) return;
     heldScrollIndex = null;
     userScrollOffset = 0;
     _recomputeTargets(force: false);

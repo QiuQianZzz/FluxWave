@@ -296,7 +296,9 @@ class _LyricViewState extends State<LyricView>
     _tapHoldIndex = targetIndex;
     _lastReportedTimeMs = _effectiveTimeMs(startTimeMs);
     _dotsGotPosition = true;
-    _engine.resumeFollow();
+    // 不调 resumeFollow()：_onPointerUp 已清 heldScrollIndex + userScrollOffset，
+    // 这里只更新锚点。避免两次 resumeFollow → _recomputeTargets 重置级联延迟
+    // 导致弹簧动画"重新开始"。
     _engine.setCurrent(targetIndex, force: false);
     _scheduleTicks();
     if (mounted) setState(() {});
@@ -400,9 +402,6 @@ class _LyricViewState extends State<LyricView>
       _pointerDragged = false;
       _startUserScrollHold();
     } else if (wasDown) {
-      // 纯轻点：无论是否命中某一行都解除手动浏览锚定，恢复正常跟随。
-      // 命中行时 _handleLineTap 随后会再次 resumeFollow + setCurrent（幂等），
-      // 不影响 seek；命中空白区则不会残留 heldScrollIndex 冻结列表。
       _engine.resumeFollow();
       _scheduleTicks();
       setState(() {});
@@ -694,7 +693,8 @@ class _LyricViewState extends State<LyricView>
         // mount 一帧叠影）。高度变化（如进入圆点槽）弹簧落到新位置。
         if ((_needsJump || _heightsChanged) &&
             !_pointerDown &&
-            _userScrollHoldTimer == null) {
+            _userScrollHoldTimer == null &&
+            !_engine.anyMoving) {
           final force = _needsJump;
           _needsJump = false;
           final heightsChanged = _heightsChanged;

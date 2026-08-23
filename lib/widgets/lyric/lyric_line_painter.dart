@@ -320,6 +320,7 @@ class LyricLinePainter extends CustomPainter {
           : ((currentTimeMs - row.firstSyllableStart) / dur).clamp(0.0, 1.0);
     }
 
+    // YRC 逐字：找到当前正在播放的音节。
     final activeLayout = row.rowLayouts.firstWhere(
       (l) =>
           currentTimeMs >= l.syllable.startTimeMs &&
@@ -336,13 +337,38 @@ class LyricLinePainter extends CustomPainter {
       },
     );
 
+    // 音节内进度
+    final syllableDur =
+        (activeLayout.syllable.endTimeMs - activeLayout.syllable.startTimeMs)
+            .clamp(1, 0x7FFFFFFF);
+    final intraProgress =
+        ((currentTimeMs - activeLayout.syllable.startTimeMs) / syllableDur)
+            .clamp(0.0, 1.0);
+    final syllablePixelEnd =
+        activeLayout.position.dx + activeLayout.width;
+
+    // currentTimeMs 落在音节间隙（两个音节之间）时，线性插值到下一个音节
+    // 起点，避免进度卡在当前音节右端导致"回跳"。
+    if (currentTimeMs >= activeLayout.syllable.endTimeMs) {
+      final nextIdx = row.rowLayouts.indexOf(activeLayout) + 1;
+      if (nextIdx < row.rowLayouts.length) {
+        final next = row.rowLayouts[nextIdx];
+        final gapStart = activeLayout.syllable.endTimeMs.toDouble();
+        final gapEnd = next.syllable.startTimeMs.toDouble();
+        final gap =
+            (gapEnd - gapStart).clamp(1.0, double.infinity);
+        final t = ((currentTimeMs - gapStart) / gap).clamp(0.0, 1.0);
+        final pixelAtEnd = syllablePixelEnd;
+        final pixelAtNextStart = next.position.dx;
+        final currentPixelPosition =
+            pixelAtEnd + (pixelAtNextStart - pixelAtEnd) * t;
+        return ((currentPixelPosition - row.totalMinX) / row.totalWidth)
+            .clamp(0.0, 1.0);
+      }
+    }
+
     final currentPixelPosition =
-        activeLayout.position.dx +
-        activeLayout.width *
-            ((currentTimeMs - activeLayout.syllable.startTimeMs) /
-                (activeLayout.syllable.endTimeMs -
-                        activeLayout.syllable.startTimeMs)
-                    .clamp(1.0, double.maxFinite));
+        activeLayout.position.dx + activeLayout.width * intraProgress;
 
     return ((currentPixelPosition - row.totalMinX) / row.totalWidth).clamp(
       0.0,
