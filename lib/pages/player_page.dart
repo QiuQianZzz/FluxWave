@@ -878,16 +878,36 @@ class _LyricPanel extends StatefulWidget {
 }
 
 class _LyricPanelState extends State<_LyricPanel> {
-  /// 进程级 LyricProvider 单例（首次访问时从 NeteaseProvider 取 api 构造）。
-  static LyricProvider? _provider;
+  /// 每个 State 独立的 LyricProvider（避免 static 共享导致缓存跨实例污染）。
+  LyricProvider? _provider;
 
   List<LyricLine> _lines = const [];
   bool _loading = true;
+  bool _enableAmllDb = true;
+  SettingsProvider? _settings;
 
   @override
   void initState() {
     super.initState();
+    _settings = context.read<SettingsProvider>();
+    _enableAmllDb = _settings!.enableAmllDb;
     _loadLyrics();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final settings = context.watch<SettingsProvider>();
+    if (_enableAmllDb != settings.enableAmllDb) {
+      _enableAmllDb = settings.enableAmllDb;
+      _provider?.invalidateSong(widget.songId, songKey: widget.songKey);
+      _loadLyrics();
+    }
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   @override
@@ -941,6 +961,7 @@ class _LyricPanelState extends State<_LyricPanel> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<SettingsProvider>();
     final cs = Theme.of(context).colorScheme;
     // 声明竖直拖动：与 PlayerPage 外层「水平拖动切换 播放页⇄歌词页」的手势
     // 分流。歌词列表是竖直滚动的，若不声明，真实手指滚动时的轻微横向抖动会

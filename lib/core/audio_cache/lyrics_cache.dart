@@ -51,26 +51,29 @@ class LyricsCache {
   }
 
   /// 歌词文件路径（不存在也返回路径）。
-  String filePath(String songKey) =>
-      '${_cacheRoot!.path}${Platform.pathSeparator}$songKey${Platform.pathSeparator}lyrics.txt';
+  /// [isTtml] 为 true 时返回 TTML 专用缓存文件，否则返回平台歌词文件。
+  String filePath(String songKey, {bool isTtml = false}) =>
+      '${_cacheRoot!.path}${Platform.pathSeparator}$songKey${Platform.pathSeparator}${isTtml ? 'lyrics_ttml.txt' : 'lyrics.txt'}';
 
   /// 读取歌词文本。不存在返回 null。
-  Future<String?> read(String songKey) async {
+  /// [isTtml] 为 true 时读取 TTML 缓存，否则读取平台歌词缓存。
+  Future<String?> read(String songKey, {bool isTtml = false}) async {
     final root = _cacheRoot;
     if (root == null) return null;
     try {
-      final f = File(filePath(songKey));
+      final f = File(filePath(songKey, isTtml: isTtml));
       if (await f.exists()) return await f.readAsString();
     } catch (_) {}
     return null;
   }
 
   /// 写入歌词文本。
-  Future<void> write(String songKey, String lyrics) async {
+  /// [isTtml] 为 true 时写入 TTML 缓存，否则写入平台歌词缓存。
+  Future<void> write(String songKey, String lyrics, {bool isTtml = false}) async {
     final root = _cacheRoot;
     if (root == null || lyrics.isEmpty) return;
     try {
-      final f = File(filePath(songKey));
+      final f = File(filePath(songKey, isTtml: isTtml));
       await f.create(recursive: true);
       await f.writeAsString(lyrics, flush: true);
     } catch (e) {
@@ -78,33 +81,39 @@ class LyricsCache {
     }
   }
 
-  /// 删除指定歌曲的歌词。
+  /// 删除指定歌曲的歌词（平台 + TTML 缓存一并删除）。
   Future<void> delete(String songKey) async {
     final root = _cacheRoot;
     if (root == null) return;
     try {
-      final f = File(filePath(songKey));
-      if (await f.exists()) await f.delete();
+      for (final name in ['lyrics.txt', 'lyrics_ttml.txt']) {
+        final f = File(
+          '${root.path}${Platform.pathSeparator}$songKey${Platform.pathSeparator}$name',
+        );
+        if (await f.exists()) await f.delete();
+      }
     } catch (_) {}
   }
 
-  /// 清空全部歌词缓存。
+  /// 清空全部歌词缓存（平台 + TTML）。
   Future<void> clearAll() async {
     final root = _cacheRoot;
     if (root == null) return;
     try {
       await for (final entity in root.list()) {
         if (entity is Directory) {
-          final lyrics = File(
-            '${entity.path}${Platform.pathSeparator}lyrics.txt',
-          );
-          if (await lyrics.exists()) await lyrics.delete();
+          for (final name in ['lyrics.txt', 'lyrics_ttml.txt']) {
+            final f = File(
+              '${entity.path}${Platform.pathSeparator}$name',
+            );
+            if (await f.exists()) await f.delete();
+          }
         }
       }
     } catch (_) {}
   }
 
-  /// 当前歌词文件总数（诊断/测试）。
+  /// 当前歌词文件总数（诊断/测试）。统计平台 + TTML 缓存。
   Future<int> count() async {
     final root = _cacheRoot;
     if (root == null) return 0;
@@ -112,10 +121,12 @@ class LyricsCache {
       var n = 0;
       await for (final entity in root.list()) {
         if (entity is Directory) {
-          final lyrics = File(
-            '${entity.path}${Platform.pathSeparator}lyrics.txt',
-          );
-          if (await lyrics.exists()) n++;
+          for (final name in ['lyrics.txt', 'lyrics_ttml.txt']) {
+            final f = File(
+              '${entity.path}${Platform.pathSeparator}$name',
+            );
+            if (await f.exists()) n++;
+          }
         }
       }
       return n;

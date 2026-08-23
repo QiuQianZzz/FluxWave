@@ -352,5 +352,41 @@ void main() {
       expect(second, isEmpty);
       expect(calls, 2);
     });
+
+    test('enableTtml=false 跳过 TTML 阶段，直接走 Netease', () async {
+      var callCount = 0;
+      final provider = makeProvider((_) async {
+        callCount++;
+        return {
+          'code': 200,
+          'lrc': {'lyric': '[00:01.000]Netease歌词'},
+        };
+      });
+      final lines = await provider.load(1, enableTtml: false);
+      expect(lines.length, 1);
+      expect(lines[0].text, 'Netease歌词');
+      expect(callCount, 1);
+    });
+
+    test('LRU cache: 最近使用的不被淘汰', () async {
+      final provider = makeProvider((_) async {
+        return {
+          'code': 200,
+          'lrc': {'lyric': '[00:01.000]歌词'},
+        };
+      });
+      // 填满缓存（capacity=40），跳过 TTML 以避免网络请求
+      final futures = <Future<List<LyricLine>>>[];
+      for (var i = 0; i < 40; i++) {
+        futures.add(provider.load(i, enableTtml: false));
+      }
+      await Future.wait(futures);
+      // 访问 songId=0（移到最近使用）
+      await provider.load(0, enableTtml: false);
+      // 插入第 41 条（应淘汰最久未使用的 songId=1）
+      await provider.load(100, enableTtml: false);
+      expect(provider.cached(0), isNotNull, reason: 'recently used should survive');
+      expect(provider.cached(1), isNull, reason: 'least recently used should be evicted');
+    });
   });
 }

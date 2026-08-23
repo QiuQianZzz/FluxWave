@@ -6,21 +6,41 @@ import 'dart:io';
 ///
 /// 按 songId 从 AMLL DB 镜像站直接下载 TTML 歌词。
 /// URL 模板：`{baseUrl}/ncm-lyrics/{songId}.ttml`
+///
+/// 内置多个镜像源，按优先级依次尝试，首个成功即返回。
 class AmllDbClient {
   const AmllDbClient._();
 
-  /// 默认 AMLL DB 镜像站地址。
-  static const defaultBaseUrl = 'https://amlldb.bikonoo.com';
+  /// AMLL DB 镜像站列表（按优先级排列）。
+  static const mirrors = [
+    'https://amlldb.bikonoo.com',
+    'https://cdn.jsdmirror.cn/gh/Steve-xmh/amll-ttml-db@main',
+    'https://raw.githubusercontent.com/Steve-xmh/amll-ttml-db/refs/heads/main',
+  ];
 
   /// 按 songId 直接下载 TTML 歌词。
   ///
-  /// 返回 TTML XML 字符串；下载失败或 404 返回 null。
+  /// 依次尝试 [mirrors] 中的镜像源，首个返回 200 且内容非空的即返回。
+  /// 全部失败返回 null。
   static Future<String?> fetchTtml({
     required int songId,
-    String baseUrl = defaultBaseUrl,
+    String? baseUrl,
     Duration timeout = const Duration(seconds: 8),
   }) async {
-    final url = '$baseUrl/ncm-lyrics/$songId.ttml';
+    final sources = baseUrl != null ? [baseUrl, ...mirrors] : mirrors;
+    for (final base in sources) {
+      final result = await _fetchFromMirror(base, songId, timeout);
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  static Future<String?> _fetchFromMirror(
+    String base,
+    int songId,
+    Duration timeout,
+  ) async {
+    final url = '$base/ncm-lyrics/$songId.ttml';
     HttpClient? client;
     try {
       client = HttpClient()..connectionTimeout = timeout;

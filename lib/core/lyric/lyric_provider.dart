@@ -21,12 +21,16 @@ class LyricProvider {
   /// 歌词请求函数（注入 [NeteaseApi.lyric]，便于测试 mock）。
   final Future<Map<String, dynamic>> Function(int songId) _fetchLyric;
 
-  // 进程内缓存：songId → 解析后的歌词。容量 40。
-  // 值域有两类：非空歌词列表 = 已成功加载；[_noLyrics] 哨兵 = 已确认该歌
-  // 无歌词（code==200 但无歌词文本），命中直接返回空，不再发网络请求。
+  // 进程内缓存（LRU）：songId → 解析后的歌词。容量 40。
+  // 使用 LinkedHashMap（insertionOrder = false）实现 LRU：
+  // - 读取时 remove + reinsert 移到末尾（最近使用）
+  // - 淘汰时 removeFirst（最久未使用）
   static const _kCacheLimit = 40;
   final _cache = <int, List<LyricLine>>{};
   final _loading = <int, Future<List<LyricLine>>>{};
+
+  // 代际计数器：每次 invalidateSong 递增，过滤过期请求的结果写入。
+  final _generation = <int, int>{};
 
   /// 确定性无歌词哨兵：接口正常（code==200）但无歌词文本。
   ///
@@ -57,20 +61,25 @@ class LyricProvider {
     String? songKey,
     bool enableTtml = true,
   }) async {
-    final cached = _cache[songId];
-    if (cached != null) return cached;
+    final cached = _cache.remove(songId);
+    if (cached != null) {
+      _cache[songId] = cached;
+      return cached;
+    }
 
     final pending = _loading[songId];
     if (pending != null) return pending;
 
+    final gen = _generation[songId] ?? 0;
     final fut = _fetchAndParse(songId, songKey: songKey, enableTtml: enableTtml);
     _loading[songId] = fut;
     try {
       final lines = await fut;
+      // 过期请求：中间被 invalidateSong 过，结果已失效，不写入缓存。
+      if ((_generation[songId] ?? 0) != gen) return lines;
       if (lines.isNotEmpty) {
         _putCache(songId, lines);
       } else if (identical(lines, _noLyrics)) {
-        // 确定性无歌词：缓存哨兵，下次 load 直接命中、不再请求。
         _putCache(songId, _noLyrics);
       }
       return lines;
@@ -79,12 +88,25 @@ class LyricProvider {
     }
   }
 
-  /// 同步取缓存（无网络请求）；无缓存返回 null。
-  List<LyricLine>? cached(int songId) => _cache[songId];
+  /// 同步取缓存（无网络请求）；无缓存返回 null。命中时标记为最近使用。
+  List<LyricLine>? cached(int songId) {
+    final lines = _cache.remove(songId);
+    if (lines != null) _cache[songId] = lines; // reinsert at end = most recently used
+    return lines;
+  }
 
   /// 失效单首歌的缓存（切歌时不必要调用，仅用于强制刷新）。
   void invalidate(int songId) {
     _cache.remove(songId);
+  }
+
+  /// 失效单首歌的内存 + 磁盘缓存（开关切换时调用，强制重新加载）。
+  Future<void> invalidateSong(int songId, {String? songKey}) async {
+    _cache.remove(songId);
+    _generation[songId] = (_generation[songId] ?? 0) + 1;
+    if (songKey != null) {
+      await LyricsCache.instance.delete(songKey);
+    }
   }
 
   /// 清空所有缓存。
@@ -97,10 +119,13 @@ class LyricProvider {
     String? songKey,
     bool enableTtml = true,
   }) async {
-    // 1. 尝试磁盘缓存（原始文本）。磁盘读取失败不视为歌词失败，回退网络。
+    // 1. 尝试磁盘缓存（TTML 和平台歌词分开存储，互不干扰）。
     if (songKey != null) {
       try {
-        final diskCached = await LyricsCache.instance.read(songKey);
+        final diskCached = await LyricsCache.instance.read(
+          songKey,
+          isTtml: enableTtml,
+        );
         if (diskCached != null && diskCached.isNotEmpty) {
           final lines = LyricParser.parseAuto(diskCached);
           if (lines.isNotEmpty) return lines;
@@ -109,6 +134,7 @@ class LyricProvider {
     }
 
     // 2. 尝试 AMLL DB TTML（逐字级别最高质量），需开关开启。
+    //    若 TTML 解析后无逐字数据（纯行级），降级到 Netease（YRC 可能有逐字）。
     if (enableTtml) {
       try {
         final ttmlContent = await AmllDbClient.fetchTtml(songId: songId);
@@ -117,17 +143,16 @@ class LyricProvider {
           final cleaned = TtmlParser.cleanTranslations(sanitized);
           final lines = LyricParser.parseTtml(cleaned);
           if (lines.isEmpty) {
-            // 清洗后解析失败，尝试直接解析 sanitized 内容
             final rawLines = LyricParser.parseTtml(sanitized);
-            if (rawLines.isNotEmpty) {
+            if (rawLines.isNotEmpty && _hasWordLevel(rawLines)) {
               if (songKey != null) {
-                LyricsCache.instance.write(songKey, ttmlContent);
+                LyricsCache.instance.write(songKey, ttmlContent, isTtml: true);
               }
               return rawLines;
             }
-          } else {
+          } else if (_hasWordLevel(lines)) {
             if (songKey != null) {
-              LyricsCache.instance.write(songKey, ttmlContent);
+              LyricsCache.instance.write(songKey, ttmlContent, isTtml: true);
             }
             return lines;
           }
@@ -144,12 +169,12 @@ class LyricProvider {
     final yrc = _extractLyricText(body, 'yrc');
     final lrc = _extractLyricText(body, 'lrc');
     final mainText = yrc.isNotEmpty ? yrc : lrc;
+
     // code==200 但无歌词文本 → 确定性无歌词（哨兵，可缓存）。
     if (mainText.isEmpty) return _noLyrics;
 
     // 解析主歌词
     final mainLines = LyricParser.parseAuto(mainText);
-    // 有文本但解析不出任何行 → 视为确定性无歌词（哨兵，可缓存）。
     if (mainLines.isEmpty) return _noLyrics;
 
     // 翻译：ytlrc 优先，回退 tlyric
@@ -179,7 +204,7 @@ class LyricProvider {
       );
     }
 
-    // 4. 写入磁盘缓存（原始文本，不含翻译/罗马音对齐后的结构）
+    // 4. 写入磁盘缓存（平台歌词，原始文本，不含翻译/罗马音对齐后的结构）
     if (songKey != null && mainText.isNotEmpty) {
       LyricsCache.instance.write(songKey, mainText);
     }
@@ -195,9 +220,20 @@ class LyricProvider {
     return lyric is String ? lyric : '';
   }
 
+  /// 检查歌词行是否包含逐字数据（至少 30% 的行有 words）。
+  static bool _hasWordLevel(List<LyricLine> lines) {
+    if (lines.isEmpty) return false;
+    var wordCount = 0;
+    for (final line in lines) {
+      if (line.words != null && line.words!.isNotEmpty) wordCount++;
+    }
+    return wordCount >= lines.length * 0.3;
+  }
+
   void _putCache(int songId, List<LyricLine> lines) {
-    if (_cache.length >= _kCacheLimit && !_cache.containsKey(songId)) {
-      _cache.remove(_cache.keys.first);
+    _cache.remove(songId); // remove first to update insertion order
+    if (_cache.length >= _kCacheLimit) {
+      _cache.remove(_cache.keys.first); // evict least recently used
     }
     _cache[songId] = lines;
   }

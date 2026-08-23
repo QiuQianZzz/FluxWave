@@ -217,9 +217,10 @@ class TtmlParser {
 
   // ── 行级处理 ─────────────────────────────────────────────
 
-  static LyricLine? _processLineElement(XmlElement p) {
+  /// 解析单个 `<p>` 元素，返回主歌词行 + 可选的背景人声行。
+  static List<LyricLine> _processLineElement(XmlElement p) {
     final id = _getAttr(p, _nsItunes, 'key', fallbackAttr: 'itunes:key');
-    if (id == null || id.isEmpty) return null;
+    if (id == null || id.isEmpty) return const [];
 
     final state = _extractNodeState(p);
     _finalizeWords(state.words);
@@ -252,8 +253,8 @@ class TtmlParser {
           endTime > 0 ? endTime : 0));
     }
 
-    if (cleanFullText.isEmpty && state.words.isEmpty) return null;
-    if (startTime == 0 && endTime == 0) return null;
+    if (cleanFullText.isEmpty && state.words.isEmpty) return const [];
+    if (startTime == 0 && endTime == 0) return const [];
 
     final lyricWords = state.words
         .map((w) => LyricWord(
@@ -263,14 +264,41 @@ class TtmlParser {
             ))
         .toList();
 
-    return LyricLine(
-      text: cleanFullText,
-      startTimeMs: startTime,
-      endTimeMs: endTime,
-      words: lyricWords,
-      translation: state.translationText,
-      roman: state.romanText,
-    );
+    final result = <LyricLine>[
+      LyricLine(
+        text: cleanFullText,
+        startTimeMs: startTime,
+        endTimeMs: endTime,
+        words: lyricWords,
+        translation: state.translationText,
+        roman: state.romanText,
+      ),
+    ];
+
+    // 背景人声行：紧随主歌词行之后，标记 isBG。
+    final bg = state.bgVocal;
+    if (bg != null && bg.text.isNotEmpty) {
+      final bgWords = bg.words
+          .where((w) => w.text.isNotEmpty)
+          .map((w) => LyricWord(
+                text: w.text,
+                startTimeMs: w.startTime,
+                endTimeMs: w.endTime,
+              ))
+          .toList();
+      final bgStart =
+          bg.startTime > 0 ? bg.startTime : startTime;
+      final bgEnd = bg.endTime > 0 ? bg.endTime : endTime;
+      result.add(LyricLine(
+        text: bg.text,
+        startTimeMs: bgStart,
+        endTimeMs: bgEnd,
+        words: bgWords.isEmpty ? null : bgWords,
+        isBG: true,
+      ));
+    }
+
+    return result;
   }
 
   static void _finalizeWords(List<_WordEntry> words) {
@@ -311,12 +339,10 @@ class TtmlParser {
       final localName = child.name.local;
       if (localName == 'div') {
         for (final p in child.findAllElements('p')) {
-          final line = _processLineElement(p);
-          if (line != null) lines.add(line);
+          lines.addAll(_processLineElement(p));
         }
       } else if (localName == 'p') {
-        final line = _processLineElement(child);
-        if (line != null) lines.add(line);
+        lines.addAll(_processLineElement(child));
       }
     }
 
@@ -363,16 +389,33 @@ class TtmlParser {
     return doc.toXmlString().replaceAll(RegExp(r'\n\s*'), '');
   }
 
+  /// 从多语言列表中选择主语言。
+  ///
+  /// 优先级：Hans（简体）> Hant（繁体）> zh*（中文变体）> 第一个。
+  /// 按 BCP 47 语言标签结构解析（language-script-region）。
   static String? _selectMajorLang(List<String> langs) {
     if (langs.isEmpty) return null;
+
+    // 解析为 (原始字符串, 子标签列表)。
+    final parsed = <(String, List<String>)>[];
     for (final lang in langs) {
-      if (lang.contains('Hans')) return lang;
+      parsed.add((lang, lang.split('-').map((s) => s.trim()).toList()));
     }
-    for (final lang in langs) {
-      if (lang.contains('Hant')) return lang;
+
+    // Hans（简体）：检查 script 部分或完整标签
+    for (final (raw, parts) in parsed) {
+      if (parts.any((p) => p == 'Hans')) return raw;
+      if (raw.contains('Hans')) return raw;
     }
-    for (final lang in langs) {
-      if (lang.startsWith('zh')) return lang;
+    // Hant（繁体）
+    for (final (raw, parts) in parsed) {
+      if (parts.any((p) => p == 'Hant')) return raw;
+      if (raw.contains('Hant')) return raw;
+    }
+    // zh*（中文变体）：language code 为 zh
+    for (final (raw, parts) in parsed) {
+      if (parts.isNotEmpty && parts[0] == 'zh') return raw;
+      if (raw.startsWith('zh')) return raw;
     }
     return langs.first;
   }

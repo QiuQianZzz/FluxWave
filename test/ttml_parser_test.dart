@@ -136,6 +136,55 @@ void main() {
       expect(lines[0].text, '第一行');
       expect(lines[1].text, '第二行');
     });
+
+    test('parses background vocal (x-bg) as isBG line', () {
+      final ttml = _w(
+        '<p itunes:key="L1" begin="00:01.000" end="00:03.000">'
+        '<span begin="00:01.000" end="00:03.000">主唱</span>'
+        '<span ttm:role="x-bg" begin="00:01.500" end="00:02.500">和声</span>'
+        '</p>',
+      );
+      final lines = TtmlParser.parse(ttml);
+      expect(lines.length, 2);
+      // 主歌词行
+      expect(lines[0].text, '主唱');
+      expect(lines[0].isBG, false);
+      // 背景人声行
+      expect(lines[1].text, '和声');
+      expect(lines[1].isBG, true);
+      expect(lines[1].startTimeMs, 1500);
+      expect(lines[1].endTimeMs, 2500);
+    });
+
+    test('parses background vocal with word-level timing', () {
+      final ttml = _w(
+        '<p itunes:key="L1" begin="00:01.000" end="00:04.000">'
+        '<span begin="00:01.000" end="00:04.000">主唱</span>'
+        '<span ttm:role="x-bg" begin="00:02.000" end="00:03.000">'
+        '<span begin="00:02.000" end="00:02.500">和</span>'
+        '<span begin="00:02.500" end="00:03.000">声</span>'
+        '</span></p>',
+      );
+      final lines = TtmlParser.parse(ttml);
+      expect(lines.length, 2);
+      expect(lines[1].isBG, true);
+      expect(lines[1].words, isNotNull);
+      expect(lines[1].words!.length, 2);
+      expect(lines[1].words![0].text, '和');
+      expect(lines[1].words![1].text, '声');
+    });
+
+    test('BG vocal without text is omitted', () {
+      final ttml = _w(
+        '<p itunes:key="L1" begin="00:01.000" end="00:03.000">'
+        '<span begin="00:01.000" end="00:03.000">主唱</span>'
+        '<span ttm:role="x-bg" begin="00:01.000" end="00:03.000">  </span>'
+        '</p>',
+      );
+      final lines = TtmlParser.parse(ttml);
+      expect(lines.length, 1);
+      expect(lines[0].isBG, false);
+    });
   });
 
   group('LyricParser TTML integration', () {
@@ -156,6 +205,42 @@ void main() {
       expect(lines.length, 1);
       expect(lines[0].text, 'TTML');
       expect(lines[0].words, isNotNull);
+    });
+  });
+
+  group('TtmlParser.cleanTranslations', () {
+    test('keeps single language unchanged', () {
+      final ttml = _w(
+        '<p itunes:key="L1" begin="00:01.000" end="00:03.000">'
+        '<span begin="00:01.000" end="00:03.000">你好</span>'
+        '<span ttm:role="x-translation" xml:lang="zh-Hans">Hello</span></p>',
+      );
+      final cleaned = TtmlParser.cleanTranslations(ttml);
+      expect(cleaned, contains('xml:lang="zh-Hans"'));
+    });
+
+    test('selects Hans over other languages', () {
+      final ttml = _w(
+        '<p itunes:key="L1" begin="00:01.000" end="00:03.000">'
+        '<span begin="00:01.000" end="00:03.000">你好</span>'
+        '<span ttm:role="x-translation" xml:lang="ja">こんにちは</span>'
+        '<span ttm:role="x-translation" xml:lang="zh-Hans">Hello</span></p>',
+      );
+      final cleaned = TtmlParser.cleanTranslations(ttml);
+      expect(cleaned, contains('zh-Hans'));
+      expect(cleaned, isNot(contains('ja')));
+    });
+
+    test('selects Hant when no Hans', () {
+      final ttml = _w(
+        '<p itunes:key="L1" begin="00:01.000" end="00:03.000">'
+        '<span begin="00:01.000" end="00:03.000">你好</span>'
+        '<span ttm:role="x-translation" xml:lang="ja">こんにちは</span>'
+        '<span ttm:role="x-translation" xml:lang="zh-Hant">您好</span></p>',
+      );
+      final cleaned = TtmlParser.cleanTranslations(ttml);
+      expect(cleaned, contains('zh-Hant'));
+      expect(cleaned, isNot(contains('ja')));
     });
   });
 
