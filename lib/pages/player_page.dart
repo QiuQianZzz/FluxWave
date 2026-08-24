@@ -895,7 +895,7 @@ class _LyricPanelState extends State<_LyricPanel> {
   /// 进程级 LyricProvider 单例（内存缓存跨路由复用，避免每次打开播放页重新加载）。
   static LyricProvider? _provider;
 
-  final _lyricViewKey = GlobalKey<LyricViewState>();
+  VoidCallback? _resetDragStateFn;
   List<LyricLine> _lines = const [];
   bool _loading = true;
   bool _enableAmllDb = true;
@@ -984,7 +984,7 @@ class _LyricPanelState extends State<_LyricPanel> {
   }
 
   /// 切回播放页时重置歌词拖动状态。
-  void resetDragState() => _lyricViewKey.currentState?.resetDragState();
+  void resetDragState() => _resetDragStateFn?.call();
 
   @override
   Widget build(BuildContext context) {
@@ -1027,7 +1027,6 @@ class _LyricPanelState extends State<_LyricPanel> {
                   final pos = snap.data?.inMilliseconds ?? 0;
                   final settings = context.watch<SettingsProvider>();
                   return LyricView(
-                    key: _lyricViewKey,
                     lines: _lines,
                     currentTimeMs: pos,
                     activeColor: cs.primary,
@@ -1044,6 +1043,7 @@ class _LyricPanelState extends State<_LyricPanel> {
                     onLyricLongPress: (startMs) {
                       AppToast.show(context, '歌词截图分享：待实现');
                     },
+                    onResetDragState: (fn) => _resetDragStateFn = fn,
                   );
                 },
               ),

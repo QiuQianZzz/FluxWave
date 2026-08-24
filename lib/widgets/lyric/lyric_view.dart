@@ -59,6 +59,10 @@ class LyricView extends StatefulWidget {
   /// 歌词弹簧强度档位。
   final LyricSpringPreset lyricSpringPreset;
 
+  /// 外部请求重置拖动状态的回调（如切回播放页时）。
+  /// 由 State 注册，外部通过字段调用，避免 GlobalKey 耦合。
+  final ValueChanged<VoidCallback?>? onResetDragState;
+
   const LyricView({
     super.key,
     required this.lines,
@@ -74,6 +78,7 @@ class LyricView extends StatefulWidget {
     this.lyricSpringPreset = LyricSpringPreset.standard,
     this.onSeekLine,
     this.onLyricLongPress,
+    this.onResetDragState,
   });
 
   @override
@@ -180,6 +185,8 @@ class LyricViewState extends State<LyricView>
     super.initState();
     _engine = _createEngine();
     _ticker = createTicker(_onTick);
+    // 将 resetDragState 方法注册给外部，避免 GlobalKey 耦合。
+    widget.onResetDragState?.call(resetDragState);
     // 首帧直接 force 布局（引擎此时无视口，setCurrent 提前返回，真正的
     // force 落在 build 里的同步 reposition），避免 mount 一帧叠影。
     _needsJump = true;
@@ -196,6 +203,10 @@ class LyricViewState extends State<LyricView>
   @override
   void didUpdateWidget(covariant LyricView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // widget 重建时重新注册 resetDragState，确保外部引用始终有效。
+    if (widget.onResetDragState != oldWidget.onResetDragState) {
+      widget.onResetDragState?.call(resetDragState);
+    }
     if (oldWidget.lines != widget.lines) {
       _currentIndex = -1;
       _needsJump = true;
