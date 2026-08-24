@@ -31,6 +31,11 @@ class PredictiveBackGesture extends StatefulWidget {
     this.enabled = true,
   }) : assert(scaleTo > 0 && scaleTo <= 1, 'scaleTo 必须为 (0, 1] 内的比例');
 
+  /// 当前是否有 [showPredictiveBackSheet] 弹层活跃。
+  /// PageRoute 可据此禁用自身的 `popGestureEnabled`，避免与弹层同时认领手势。
+  static bool get hasActiveSheet => _activeSheetCount > 0;
+  static int _activeSheetCount = 0;
+
   /// 被预览缩放的面板内容（应包含背景/圆角/阴影的整块，勿只包内部列表）。
   final Widget child;
 
@@ -63,8 +68,12 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
   static const Duration _shrinkFillDuration = Duration(milliseconds: 80);
   static const Curve _shrinkFillCurve = Curves.easeOutCubic;
 
-  /// 手势可被认领的条件：本弹层是最上层路由，且路由允许 pop 手势。
-  bool get _isEnabled => _route?.isCurrent == true && _route!.popGestureEnabled;
+  /// 手势可被认领的条件：本弹层是最上层路由。
+  /// 注意：不检查 [ModalRoute.popGestureEnabled]，因为手势认领通过
+  /// [PredictiveBackHandler] mixin 在组件层面完成，而非路由层面。
+  /// 自定义 [_PredictiveBackSheetRoute] 设置 popGestureEnabled=false
+  /// 以阻止路由自身认领预测性返回，避免与底层 PageRoute 冲突。
+  bool get _isEnabled => _route?.isCurrent == true;
 
   @override
   void initState() {
@@ -88,8 +97,8 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
 
   @override
   bool handleStartBackGesture(PredictiveBackEvent backEvent) {
-    // 设置关闭预测性返回、返回按钮（isButtonEvent）、或本弹层非最上层路由时，
-    // 都不认领手势，退回系统普通返回（无预览动画）。
+    // 返回按钮（isButtonEvent）或本弹层非最上层路由时，
+    // 不认领手势，退回系统普通返回（无预览动画）。
     return widget.enabled && !backEvent.isButtonEvent && _isEnabled;
   }
 
@@ -141,8 +150,11 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
 
 /// 弹出带预测性返回的底部面板（开箱即用）。
 ///
-/// 封装 [showGeneralDialog]：打开/关闭为纯底部滑入/滑出（无缩放），预测性返回
-/// 预览由 [PredictiveBackGesture] 缩放到位时"整体等比缩小 + 底部锚定"，松手
+/// 使用自定义 [_PredictiveBackSheetRoute]（popGestureEnabled=false）阻止
+/// 路由层面认领预测性返回手势，仅由 [PredictiveBackGesture] 组件通过
+/// [PredictiveBackHandler] mixin 独占手势，避免底层 PageRoute 同时 pop。
+/// 打开/关闭为纯底部滑入/滑出（无缩放），预测性返回预览由
+/// [PredictiveBackGesture] 缩放到位时"整体等比缩小 + 底部锚定"，松手
 /// 确认后才以下滑动画关闭。
 /// [enabled] 为 false 时不做预测性返回预览（退回普通返回），用于对齐设置开关。
 Future<T?> showPredictiveBackSheet<T>(
@@ -156,42 +168,100 @@ Future<T?> showPredictiveBackSheet<T>(
   String? barrierLabel,
   bool enabled = true,
 }) {
-  return showGeneralDialog<T>(
-    context: context,
-    barrierDismissible: barrierDismissible,
-    barrierLabel: barrierLabel ?? '关闭',
+  PredictiveBackGesture._activeSheetCount++;
+  final route = _PredictiveBackSheetRoute<T>(
+    builder: builder,
     barrierColor: barrierColor ?? Colors.black.withValues(alpha: 0.32),
-    transitionDuration: const Duration(milliseconds: 300),
-    pageBuilder: (context, _, _) {
-      return Align(
-        alignment: Alignment.bottomCenter,
-        // 缩放射在 pageBuilder 顶层，包裹整块 Material（背景/圆角/阴影），
-        // 确保预测返回时是"整个面板"收缩而非仅内部列表被缩放。
-        child: PredictiveBackGesture(
-          scaleTo: scaleTo,
-          enabled: enabled,
-          child: Material(
-            color: backgroundColor ?? Theme.of(context).colorScheme.surface,
-            shape:
-                shape ??
-                const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                ),
-            clipBehavior: Clip.antiAlias,
-            child: SafeArea(top: false, child: builder(context)),
-          ),
-        ),
-      );
-    },
-    transitionBuilder: (context, animation, _, child) {
-      // 打开/正常关闭：与 showModalBottomSheet 一致，纯底部滑入/滑出，无缩放。
-      return SlideTransition(
-        position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-            .animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-            ),
-        child: child,
-      );
-    },
+    barrierLabel: barrierLabel ?? '关闭',
+    backgroundColor: backgroundColor,
+    shape: shape,
+    scaleTo: scaleTo,
+    enabled: enabled,
+    barrierDismissible: barrierDismissible,
   );
+  final result = Navigator.of(context).push<T>(route);
+  result.whenComplete(() => PredictiveBackGesture._activeSheetCount--);
+  return result;
+}
+
+/// 自定义 PopupRoute：popGestureEnabled=false 阻止路由层面认领预测性返回，
+/// 仅由 [PredictiveBackGesture] 组件通过 [PredictiveBackHandler] 独占。
+///
+/// 同时暴露 [activeSheetCount] 静态计数器：有 sheet 活跃时底层 PageRoute
+/// 可据此禁用自身的 `popGestureEnabled`，避免两个路由同时认领手势。
+class _PredictiveBackSheetRoute<T> extends PopupRoute<T> {
+  _PredictiveBackSheetRoute({
+    required this.builder,
+    required this._barrierColor,
+    required this._barrierLabel,
+    this.backgroundColor,
+    this.shape,
+    this.scaleTo = 0.85,
+    this.enabled = true,
+    this.barrierDismissible = true,
+  });
+
+  final WidgetBuilder builder;
+  final Color? backgroundColor;
+  final ShapeBorder? shape;
+  final double scaleTo;
+  final bool enabled;
+  final Color _barrierColor;
+  final String _barrierLabel;
+  @override
+  final bool barrierDismissible;
+
+  @override
+  Color? get barrierColor => _barrierColor;
+
+  @override
+  String? get barrierLabel => _barrierLabel;
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 300);
+
+  /// 关键：阻止路由自身认领预测性返回手势，仅由 PredictiveBackGesture 组件独占。
+  @override
+  bool get popGestureEnabled => false;
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: PredictiveBackGesture(
+        scaleTo: scaleTo,
+        enabled: enabled,
+        child: Material(
+          color: backgroundColor ?? Theme.of(context).colorScheme.surface,
+          shape:
+              shape ??
+              const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+          clipBehavior: Clip.antiAlias,
+          child: SafeArea(top: false, child: builder(context)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return SlideTransition(
+      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+          .animate(
+            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+          ),
+      child: child,
+    );
+  }
 }

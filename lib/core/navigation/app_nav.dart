@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../pages/tab_navigator.dart';
+import '../../widgets/predictive_back_gesture.dart';
 
 /// 统一导航入口。
 ///
@@ -44,6 +45,10 @@ class TabAwarePageRoute<T> extends MaterialPageRoute<T> {
 
   @override
   bool get popGestureEnabled {
+    // showPredictiveBackSheet 弹层活跃时，底层 PageRoute 不应认领预测性返回手势。
+    // WidgetsBinding 会向所有 PredictiveBackHandler 回调分发事件，
+    // 若 PageRoute 也认领 → 两个路由同时 pop。
+    if (PredictiveBackGesture.hasActiveSheet) return false;
     final ctx = subtreeContext;
     if (ctx != null) {
       final tab = ctx.findAncestorWidgetOfExactType<TabNavigator>();
