@@ -103,6 +103,16 @@ class LyricViewState extends State<LyricView>
   double _dragStartY = 0;
   double _dragStartScrollOffset = 0;
 
+  /// 拖动速度采样（最近几帧的 y 位移 / 时间），用于松手时计算 fling 速度。
+  double _lastSampleY = 0;
+  int _lastSampleTimeMs = 0;
+  double _dragVelocity = 0;
+
+  /// 惯性滚动状态（非 null = 正在 fling）。
+  ClampingScrollSimulation? _flingSimulation;
+  double _flingElapsedMs = 0;
+  (double min, double max)? _flingBounds;
+
   /// 手动浏览抑制窗口（非 null = 抑制中，松手/滚轮后 3 秒）。
   Timer? _userScrollHoldTimer;
 
@@ -321,7 +331,7 @@ class LyricViewState extends State<LyricView>
 
   void _scheduleTicks() {
     final needDots = _dotsActive && !_dotsFrozen;
-    if (!_engine.anyMoving && !needDots) return;
+    if (!_engine.anyMoving && !needDots && _flingSimulation == null) return;
     if (!_ticker.isActive) {
       _lastTickerElapsed = null;
       _ticker.start();
@@ -333,11 +343,28 @@ class LyricViewState extends State<LyricView>
     _lastTickerElapsed = elapsed;
     final dtMs = last == null ? 0.0 : (elapsed - last).inMicroseconds / 1000.0;
     _engine.tick(dtMs);
+    // 惯性滚动：ClampingScrollSimulation 每帧推进 userScrollOffset。
+    if (_flingSimulation != null) {
+      _flingElapsedMs += dtMs;
+      final pos = _flingSimulation!.x(_flingElapsedMs / 1000.0);
+      final bounds = _flingBounds;
+      if (bounds != null) {
+        _engine.setUserScrollOffset(
+          pos.clamp(bounds.$1, bounds.$2),
+          force: true,
+        );
+      }
+      if (_flingSimulation!.isDone(_flingElapsedMs / 1000.0)) {
+        _flingSimulation = null;
+        _flingBounds = null;
+        _startUserScrollHold();
+      }
+    }
     if (_dotsActive && !_dotsFrozen) {
       _dotsClockMs += dtMs.round();
     }
     if (mounted) setState(() {});
-    if (!_engine.anyMoving && !(_dotsActive && !_dotsFrozen)) {
+    if (!_engine.anyMoving && !(_dotsActive && !_dotsFrozen) && _flingSimulation == null) {
       _lastTickerElapsed = null;
       _ticker.stop();
     }
@@ -383,6 +410,13 @@ class LyricViewState extends State<LyricView>
     _userScrollHoldTimer = null;
     _dragStartY = e.position.dy;
     _dragStartScrollOffset = _engine.userScrollOffset;
+    // 拖动开始时中止上一次 fling。
+    _flingSimulation = null;
+    _flingBounds = null;
+    // 速度采样归零。
+    _lastSampleY = e.position.dy;
+    _lastSampleTimeMs = 0;
+    _dragVelocity = 0;
     // 手动浏览期间冻结对齐行：切句不打扰用户浏览。
     _engine.setHeldScrollIndex(_currentIndex);
     // 手指按下 → scrolling 变 true（解除景深模糊）。
@@ -396,6 +430,9 @@ class LyricViewState extends State<LyricView>
       _pointerDragged = true;
       _dragStartY = start.dy;
       _dragStartScrollOffset = _engine.userScrollOffset;
+      // 首次判定拖动时初始化速度采样。
+      _lastSampleY = e.position.dy;
+      _lastSampleTimeMs = e.timeStamp.inMilliseconds;
     }
     if (!_pointerDragged) return;
     // 纵向位移超过阈值才判定为歌词滚动，避免横向滑动误触关闭景深。
@@ -403,6 +440,14 @@ class LyricViewState extends State<LyricView>
         (e.position.dy - start.dy).abs() > kTouchSlop) {
       _isVerticalScrolling = true;
       setState(() {});
+    }
+    // 速度采样：取最近一帧的位移 / 时间差。
+    final nowMs = e.timeStamp.inMilliseconds;
+    final dtMs = (nowMs - _lastSampleTimeMs).toDouble();
+    if (dtMs > 10) {
+      _dragVelocity = -(_lastSampleY - e.position.dy) / dtMs;
+      _lastSampleY = e.position.dy;
+      _lastSampleTimeMs = nowMs;
     }
     final (min, max) = _engine.userScrollBounds();
     final v = (_dragStartScrollOffset - (e.position.dy - _dragStartY)).clamp(
@@ -421,12 +466,25 @@ class LyricViewState extends State<LyricView>
     _isVerticalScrolling = false;
     if (_pointerDragged) {
       _pointerDragged = false;
-      _startUserScrollHold();
+      // 松手时有足够速度 → 启动惯性滚动。
+      if (_dragVelocity.abs() > 0.3) {
+        final (min, max) = _engine.userScrollBounds();
+        _flingSimulation = ClampingScrollSimulation(
+          position: _engine.userScrollOffset,
+          velocity: -_dragVelocity * 1000, // 取反：拖动上 → 看下方歌词
+          tolerance: Tolerance.defaultTolerance,
+        );
+        _flingElapsedMs = 0;
+        _flingBounds = (min, max);
+        _scheduleTicks();
+      } else {
+        _startUserScrollHold();
+      }
     } else if (wasDown) {
       _engine.resumeFollow();
       _scheduleTicks();
-      setState(() {});
     }
+    setState(() {});
   }
 
   void _onPointerCancel(PointerCancelEvent e) {
@@ -445,6 +503,8 @@ class LyricViewState extends State<LyricView>
     _isVerticalScrolling = false;
     _pointerDragged = false;
     _pointerDownPositions.clear();
+    _flingSimulation = null;
+    _flingBounds = null;
     _engine.setHeldScrollIndex(_currentIndex);
     final (min, max) = _engine.userScrollBounds();
     final v = (_engine.userScrollOffset + e.scrollDelta.dy).clamp(min, max);
@@ -471,6 +531,8 @@ class LyricViewState extends State<LyricView>
     _isVerticalScrolling = false;
     _pointerDragged = false;
     _pointerDownPositions.clear();
+    _flingSimulation = null;
+    _flingBounds = null;
     _userScrollHoldTimer?.cancel();
     _userScrollHoldTimer = null;
     _engine.resumeFollow();
@@ -744,7 +806,7 @@ class LyricViewState extends State<LyricView>
         }
 
         // 景深模糊：纵向滚动/拖动/浏览抑制期间全部清晰（仅保留视口边缘淡出）。
-        final scrolling = _isVerticalScrolling || _userScrollHoldTimer != null;
+        final scrolling = _isVerticalScrolling || _userScrollHoldTimer != null || _flingSimulation != null;
 
         final children = <Widget>[
           const SizedBox.expand(),
