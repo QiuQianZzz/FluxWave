@@ -77,10 +77,10 @@ class LyricView extends StatefulWidget {
   });
 
   @override
-  State<LyricView> createState() => _LyricViewState();
+  State<LyricView> createState() => LyricViewState();
 }
 
-class _LyricViewState extends State<LyricView>
+class LyricViewState extends State<LyricView>
     with SingleTickerProviderStateMixin {
   late LyricEngine _engine;
 
@@ -92,6 +92,7 @@ class _LyricViewState extends State<LyricView>
 
   /// 指针/拖动跟踪（raw Listener 观察，不与手势竞技场冲突）。
   bool _pointerDown = false;
+  bool _isVerticalScrolling = false;
   final Map<int, Offset> _pointerDownPositions = {};
   bool _pointerDragged = false;
   double _dragStartY = 0;
@@ -193,9 +194,9 @@ class _LyricViewState extends State<LyricView>
   );
 
   @override
-  void didUpdateWidget(covariant LyricView old) {
-    super.didUpdateWidget(old);
-    if (old.lines != widget.lines) {
+  void didUpdateWidget(covariant LyricView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lines != widget.lines) {
       _currentIndex = -1;
       _needsJump = true;
       _engine = _createEngine();
@@ -217,17 +218,17 @@ class _LyricViewState extends State<LyricView>
       _updateCurrent();
     } else {
       final metricsChanged =
-          old.fontSize != widget.fontSize ||
-          old.activeColor != widget.activeColor ||
-          old.showTranslation != widget.showTranslation;
+          oldWidget.fontSize != widget.fontSize ||
+          oldWidget.activeColor != widget.activeColor ||
+          oldWidget.showTranslation != widget.showTranslation;
       if (metricsChanged) {
         _measuredWidth = double.infinity;
         _measuredDotsLine = -999;
       }
-      if (old.lyricSpringPreset != widget.lyricSpringPreset) {
+      if (oldWidget.lyricSpringPreset != widget.lyricSpringPreset) {
         _engine.setPreset(widget.lyricSpringPreset);
       }
-      if (old.currentTimeMs != widget.currentTimeMs) {
+      if (oldWidget.currentTimeMs != widget.currentTimeMs) {
         _dotsGotPosition = true;
         _updateCurrent();
       }
@@ -284,6 +285,7 @@ class _LyricViewState extends State<LyricView>
     _userScrollHoldTimer = null;
     _pointerDownPositions.clear();
     _pointerDown = false;
+    _isVerticalScrolling = false;
     _pointerDragged = false;
     widget.onSeekLine?.call(startTimeMs);
     final targetIndex = LyricParser.findCurrentLineIndex(
@@ -365,6 +367,7 @@ class _LyricViewState extends State<LyricView>
     // 首指的拖动状态。
     _pointerDragged = false;
     _pointerDown = true;
+    _isVerticalScrolling = false;
     _userScrollHoldTimer?.cancel();
     _userScrollHoldTimer = null;
     _dragStartY = e.position.dy;
@@ -384,6 +387,12 @@ class _LyricViewState extends State<LyricView>
       _dragStartScrollOffset = _engine.userScrollOffset;
     }
     if (!_pointerDragged) return;
+    // 纵向位移超过阈值才判定为歌词滚动，避免横向滑动误触关闭景深。
+    if (!_isVerticalScrolling &&
+        (e.position.dy - start.dy).abs() > kTouchSlop) {
+      _isVerticalScrolling = true;
+      setState(() {});
+    }
     final (min, max) = _engine.userScrollBounds();
     final v = (_dragStartScrollOffset - (e.position.dy - _dragStartY)).clamp(
       min,
@@ -398,6 +407,7 @@ class _LyricViewState extends State<LyricView>
     if (_pointerDownPositions.isNotEmpty) return;
     final wasDown = _pointerDown;
     _pointerDown = false;
+    _isVerticalScrolling = false;
     if (_pointerDragged) {
       _pointerDragged = false;
       _startUserScrollHold();
@@ -413,6 +423,7 @@ class _LyricViewState extends State<LyricView>
     if (_pointerDownPositions.isNotEmpty) return;
     final wasDown = _pointerDown;
     _pointerDown = false;
+    _isVerticalScrolling = false;
     _pointerDragged = false;
     if (wasDown) setState(() {});
   }
@@ -420,6 +431,7 @@ class _LyricViewState extends State<LyricView>
   void _onPointerSignal(PointerSignalEvent e) {
     if (e is! PointerScrollEvent || e.scrollDelta.dy == 0) return;
     _pointerDown = false;
+    _isVerticalScrolling = false;
     _pointerDragged = false;
     _pointerDownPositions.clear();
     _engine.setHeldScrollIndex(_currentIndex);
@@ -440,6 +452,19 @@ class _LyricViewState extends State<LyricView>
       _scheduleTicks();
       setState(() {});
     }
+  }
+
+  /// 切回播放页时重置拖动状态，回到无交互的自动跟行模式。
+  void resetDragState() {
+    _pointerDown = false;
+    _isVerticalScrolling = false;
+    _pointerDragged = false;
+    _pointerDownPositions.clear();
+    _userScrollHoldTimer?.cancel();
+    _userScrollHoldTimer = null;
+    _engine.resumeFollow();
+    _scheduleTicks();
+    setState(() {});
   }
 
   // ── 测量 ──
@@ -707,8 +732,8 @@ class _LyricViewState extends State<LyricView>
           _scheduleTicks();
         }
 
-        // 景深模糊：滑动/拖动/浏览抑制期间全部清晰（仅保留视口边缘淡出）。
-        final scrolling = _pointerDown || _userScrollHoldTimer != null;
+        // 景深模糊：纵向滚动/拖动/浏览抑制期间全部清晰（仅保留视口边缘淡出）。
+        final scrolling = _isVerticalScrolling || _userScrollHoldTimer != null;
 
         final children = <Widget>[
           const SizedBox.expand(),

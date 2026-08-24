@@ -52,6 +52,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 驱动封面位置/尺寸、进度条/控件位置、歌词面板透明度/高度的插值。
   /// 300ms：避免按钮/松手切换显得拖沓。
   late final AnimationController _lyricsTransition;
+  final _lyricPanelKey = GlobalKey<_LyricPanelState>();
 
   @override
   void initState() {
@@ -63,7 +64,18 @@ class _PlayerPageState extends State<PlayerPage>
     _lyricsTransition = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
-    );
+    )..addListener(_onLyricsTransitionChanged);
+  }
+
+  double _lastTransitionT = 0;
+
+  void _onLyricsTransitionChanged() {
+    final t = _lyricsTransition.value;
+    // 切回播放页（t 从 ≥0.5 降到 <0.5）：重置歌词拖动状态。
+    if (_lastTransitionT >= 0.5 && t < 0.5) {
+      _lyricPanelKey.currentState?.resetDragState();
+    }
+    _lastTransitionT = t;
   }
 
   /// 拖动放大系数：手指移动 1px，页面移动 1.5px。让歌词切换更跟手灵敏，
@@ -574,6 +586,7 @@ class _PlayerPageState extends State<PlayerPage>
                     // 浮现；淡出同曲线先快后慢（t 从 1 走低时迅速淡去）。
                     opacity: Curves.easeInCubic.transform(t),
                     child: _LyricPanel(
+                      key: _lyricPanelKey,
                       songId: song.id,
                       songKey: '${song.source}_${song.id}',
                       height: lyricsH > 0.1 ? lyricsH : 0,
@@ -866,6 +879,7 @@ class _LyricPanel extends StatefulWidget {
   final int? reloadToken;
 
   const _LyricPanel({
+    super.key,
     required this.songId,
     this.songKey,
     required this.height,
@@ -881,6 +895,7 @@ class _LyricPanelState extends State<_LyricPanel> {
   /// 进程级 LyricProvider 单例（内存缓存跨路由复用，避免每次打开播放页重新加载）。
   static LyricProvider? _provider;
 
+  final _lyricViewKey = GlobalKey<LyricViewState>();
   List<LyricLine> _lines = const [];
   bool _loading = true;
   bool _enableAmllDb = true;
@@ -968,6 +983,9 @@ class _LyricPanelState extends State<_LyricPanel> {
     }
   }
 
+  /// 切回播放页时重置歌词拖动状态。
+  void resetDragState() => _lyricViewKey.currentState?.resetDragState();
+
   @override
   Widget build(BuildContext context) {
     context.watch<SettingsProvider>();
@@ -1009,6 +1027,7 @@ class _LyricPanelState extends State<_LyricPanel> {
                   final pos = snap.data?.inMilliseconds ?? 0;
                   final settings = context.watch<SettingsProvider>();
                   return LyricView(
+                    key: _lyricViewKey,
                     lines: _lines,
                     currentTimeMs: pos,
                     activeColor: cs.primary,
