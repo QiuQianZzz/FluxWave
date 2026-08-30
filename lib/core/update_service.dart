@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'app_links.dart';
 import 'logging/app_log.dart';
 
 /// GitHub Release 更新检测服务。
@@ -15,13 +16,6 @@ class UpdateService {
   UpdateService._();
 
   static final instance = UpdateService._();
-
-  static const _owner = 'QiuQianZzz';
-  static const _repo = 'FluxWave';
-  static const _latestUrl =
-      'https://api.github.com/repos/$_owner/$_repo/releases/latest';
-  static const _releasesUrl =
-      'https://api.github.com/repos/$_owner/$_repo/releases';
 
   /// 检查是否有新版本。返回 null 表示已是最新或检查失败。
   ///
@@ -162,7 +156,7 @@ class UpdateService {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
-      final request = await client.getUrl(Uri.parse(_latestUrl));
+      final request = await client.getUrl(Uri.parse(AppLinks.kLatestReleaseApiUrl));
       request.headers.set('Accept', 'application/vnd.github.v3+json');
       request.headers.set('User-Agent', 'FluxWave/1.0');
       request.headers.set('Cache-Control', 'no-cache');
@@ -182,7 +176,7 @@ class UpdateService {
       ..connectionTimeout = const Duration(seconds: 10);
     try {
       final request = await client.getUrl(
-        Uri.parse('$_releasesUrl?per_page=10'),
+        Uri.parse('${AppLinks.kReleasesApiUrl}?per_page=10'),
       );
       request.headers.set('Accept', 'application/vnd.github.v3+json');
       request.headers.set('User-Agent', 'FluxWave/1.0');

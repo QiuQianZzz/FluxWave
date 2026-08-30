@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/app_build_info.dart';
+import '../../../core/app_links.dart';
 import '../../../core/update_service.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/app_toast.dart';
@@ -12,7 +14,7 @@ import '../../../widgets/update_dialog.dart';
 import '../../../core/logging/app_log.dart';
 import 'logs/log_list_page.dart';
 
-/// 关于 section：应用信息 + 版本 + 开源协议 + 检查更新。
+/// 关于 section：应用信息 + 版本 + 开源协议 + 仓库 + 文档 + 检查更新。
 class AboutSection extends StatelessWidget {
   const AboutSection({super.key});
 
@@ -20,11 +22,10 @@ class AboutSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     return PageListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ── 关于 ──
         SectionCard(
           icon: Icons.info_outline_rounded,
           title: '关于',
@@ -36,25 +37,59 @@ class AboutSection extends StatelessWidget {
             ),
             const Divider(height: 24),
             const _VersionRow(),
-            // debug 构建：显示真实包名（Android debug 含 .debug 后缀）与
-            // PackageInfo 版本号，release 构建该段不渲染。
-            if (AppBuildInfo.isDebug) ...[
-              const Divider(height: 24),
-              const _DebugBuildRow(),
-            ],
             const Divider(height: 24),
-            _AboutRow(icon: Icons.book_rounded, title: '开源协议', trailing: 'MIT'),
+            _LinkRow(
+              icon: Icons.book_rounded,
+              title: '开源协议',
+              trailing: 'MIT',
+              onTap: () => launchUrl(Uri.parse(AppLinks.kLicenseUrl)),
+            ),
+            const Divider(height: 24),
+            _LinkRow(
+              icon: Icons.code_rounded,
+              title: '仓库地址',
+              trailing: 'GitHub',
+              onTap: () => launchUrl(Uri.parse(AppLinks.kGitHubRepoUrl)),
+            ),
+            const Divider(height: 24),
+            _LinkRow(
+              icon: Icons.description_outlined,
+              title: '使用文档',
+              trailing: 'Docs',
+              onTap: () => launchUrl(Uri.parse(AppLinks.kDocsUrl)),
+            ),
           ],
         ),
         const SizedBox(height: 8),
+        // ── 更新 ──
+        SectionCard(
+          icon: Icons.system_update_rounded,
+          title: '更新',
+          children: [
+            _UpdateTile(
+              checkUpdateOnStart: context.select<SettingsProvider, bool>(
+                (s) => s.checkUpdateOnStart,
+              ),
+              updateChannel: context.select<SettingsProvider, String>(
+                (s) => s.updateChannel,
+              ),
+              onToggleAutoCheck: (v) =>
+                  context.read<SettingsProvider>().setCheckUpdateOnStart(v),
+              onChannelChanged: (v) =>
+                  context.read<SettingsProvider>().setUpdateChannel(v),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // ── 应用日志 ──
         SectionCard(
           icon: Icons.article_outlined,
           title: '应用日志',
           children: [
             Text(
               '查看或导出应用运行日志，用于问题反馈与排障。',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 8),
@@ -83,33 +118,15 @@ class AboutSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        SectionCard(
-          icon: Icons.system_update_rounded,
-          title: '更新',
-          children: [
-            _UpdateTile(
-              checkUpdateOnStart: context.select<SettingsProvider, bool>(
-                (s) => s.checkUpdateOnStart,
-              ),
-              updateChannel: context.select<SettingsProvider, String>(
-                (s) => s.updateChannel,
-              ),
-              onToggleAutoCheck: (v) =>
-                  context.read<SettingsProvider>().setCheckUpdateOnStart(v),
-              onChannelChanged: (v) =>
-                  context.read<SettingsProvider>().setUpdateChannel(v),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
+        // ── 致谢 ──
         SectionCard(
           icon: Icons.code_rounded,
           title: '致谢',
           children: [
             Text(
               '本项目灵感与实现参考自 SPlayer、SPlayer-Next 与 NeriPlayer，感谢社区贡献。',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -120,7 +137,7 @@ class AboutSection extends StatelessWidget {
   }
 }
 
-/// 版本行：从 PackageInfo 动态读取，pubspec.yaml 为唯一版本来源。
+/// 版本行：从 PackageInfo 动态读取，旁边附带 DEV 角标（仅 debug 构建）。
 class _VersionRow extends StatefulWidget {
   const _VersionRow();
 
@@ -149,56 +166,39 @@ class _VersionRowState extends State<_VersionRow> {
 
   @override
   Widget build(BuildContext context) {
+    final badge = AppBuildInfo.badge;
     return _AboutRow(
       icon: Icons.tag_rounded,
       title: '版本',
-      trailing: _version.isEmpty ? '...' : _version,
-    );
-  }
-}
-
-/// 仅 debug 构建渲染：展示真实包名 + PackageInfo 版本号，作为调试包标识。
-class _DebugBuildRow extends StatefulWidget {
-  const _DebugBuildRow();
-
-  @override
-  State<_DebugBuildRow> createState() => _DebugBuildRowState();
-}
-
-class _DebugBuildRowState extends State<_DebugBuildRow> {
-  String _package = '';
-  String _version = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    String package = '';
-    String version = '';
-    try {
-      final info = await PackageInfo.fromPlatform();
-      package = info.packageName;
-      version = '${info.version}+${info.buildNumber}';
-    } catch (_) {
-      // 平台/测试环境拿不到包信息时保持占位文本，不影响页面。
-    }
-    if (!mounted) return;
-    setState(() {
-      _package = package;
-      _version = version;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _AboutRow(
-      icon: Icons.terminal_rounded,
-      title: 'Debug 构建',
-      subtitle: _package.isEmpty ? '开发版（包信息不可用）' : _package,
-      trailing: _version.isEmpty ? 'DEV' : _version,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _version.isEmpty ? '...' : _version,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (badge != null) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                badge,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -228,8 +228,6 @@ class _LogEntryTile extends StatelessWidget {
 }
 
 /// 更新栏目：手动检查按钮 + 启动时自动检查开关 + 更新渠道选择。
-///
-/// 整合为一个连贯的列表项，避免按钮和开关分离显得松散。
 class _UpdateTile extends StatefulWidget {
   final bool checkUpdateOnStart;
   final String updateChannel;
@@ -276,7 +274,6 @@ class _UpdateTileState extends State<_UpdateTile> {
 
     return Column(
       children: [
-        // 手动检查
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(Icons.system_update_rounded, color: cs.onSurfaceVariant),
@@ -300,7 +297,6 @@ class _UpdateTileState extends State<_UpdateTile> {
           onTap: _checking ? null : _check,
         ),
         const Divider(height: 1),
-        // 启动时自动检查
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('启动时自动检查'),
@@ -314,7 +310,6 @@ class _UpdateTileState extends State<_UpdateTile> {
           onChanged: widget.onToggleAutoCheck,
         ),
         const Divider(height: 1),
-        // 更新渠道
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('更新渠道'),
@@ -351,11 +346,67 @@ class _UpdateTileState extends State<_UpdateTile> {
   }
 }
 
+/// 可点击的关于行：图标 + 标题 + trailing，点击触发 [onTap]。
+class _LinkRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? trailing;
+  final VoidCallback? onTap;
+
+  const _LinkRow({
+    required this.icon,
+    required this.title,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 22, color: cs.onSurfaceVariant),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                title,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            if (trailing != null) ...[
+              Text(
+                trailing!,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              // ignore: use_null_aware_elements
+              if (onTap != null) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded, size: 18, color: cs.onSurfaceVariant),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 不可点击的关于行：图标 + 标题 + 可选副标题 + trailing（Widget）。
 class _AboutRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
-  final String? trailing;
+  final Widget? trailing;
   const _AboutRow({
     required this.icon,
     required this.title,
@@ -366,9 +417,10 @@ class _AboutRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     return Row(
       children: [
-        Icon(icon, size: 22, color: theme.colorScheme.onSurfaceVariant),
+        Icon(icon, size: 22, color: cs.onSurfaceVariant),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
@@ -384,19 +436,13 @@ class _AboutRow extends StatelessWidget {
                 Text(
                   subtitle!,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: cs.onSurfaceVariant,
                   ),
                 ),
             ],
           ),
         ),
-        if (trailing != null)
-          Text(
-            trailing!,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
+        ?trailing,
       ],
     );
   }
