@@ -28,6 +28,7 @@ class UpdateDialog extends StatefulWidget {
 class _UpdateDialogState extends State<UpdateDialog> {
   double? _progress;
   bool _downloading = false;
+  bool _verifying = false;
   String? _error;
   bool _apkExists = false;
 
@@ -51,6 +52,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
     setState(() {
       _downloading = true;
       _progress = _apkExists ? 1.0 : 0;
+      _verifying = false;
       _error = null;
     });
 
@@ -65,6 +67,29 @@ class _UpdateDialogState extends State<UpdateDialog> {
 
       if (!mounted) return;
       setState(() => _progress = 1.0);
+
+      // SHA256 校验
+      if (widget.info.hasSha256) {
+        if (mounted) setState(() => _verifying = true);
+
+        final expectedHash = await UpdateService.instance.fetchExpectedSha256(
+          widget.info.sha256Url!,
+        );
+
+        if (!mounted) return;
+
+        final error = await UpdateService.instance.verifySha256(
+          filePath: filePath,
+          expectedHash: expectedHash,
+        );
+
+        if (mounted) setState(() => _verifying = false);
+
+        if (error != null) {
+          if (mounted) setState(() => _error = error);
+          return;
+        }
+      }
 
       // 短暂显示完成状态后打开安装界面
       await Future.delayed(const Duration(milliseconds: 300));
@@ -254,6 +279,29 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   // 下载进度
                   if (_downloading) ...[
                     _buildDownloadProgress(theme, cs),
+                    const SizedBox(height: 12),
+                  ],
+                  // 校验状态
+                  if (_verifying) ...[
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: cs.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '正在校验文件完整性…',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 12),
                   ],
                   // 错误提示

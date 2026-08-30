@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -55,6 +56,7 @@ class UpdateService {
           releaseNotes: release.body,
           releaseUrl: release.htmlUrl,
           downloadUrl: release.downloadUrl,
+          sha256Url: release.sha256Url,
           publishedAt: release.publishedAt,
           isPrerelease: release.isPrerelease,
           changelogEntries: changelogEntries,
@@ -259,6 +261,73 @@ class UpdateService {
     }
     return false;
   }
+
+  /// 计算文件的 SHA256 哈希值（小写十六进制）。
+  Future<String> computeFileSha256(String filePath) async {
+    final file = File(filePath);
+    final stream = file.openRead();
+    final digest = await sha256.bind(stream).first;
+    return digest.toString();
+  }
+
+  /// 从 GitHub 获取期望的 SHA256 哈希值。
+  ///
+  /// [sha256Url] 指向 .sha256 文件（内容格式为 `<hash>  <filename>` 或纯 hash）。
+  Future<String?> fetchExpectedSha256(String sha256Url) async {
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 10);
+      try {
+        final request = await client.getUrl(Uri.parse(sha256Url));
+        request.headers.set('User-Agent', 'FluxWave/1.0');
+        final response = await request.close();
+        if (response.statusCode != 200) return null;
+        final body = await response.transform(utf8.decoder).join();
+        // 支持两种格式：
+        // 1. 纯哈希: "a1b2c3..."
+        // 2. 标准格式: "a1b2c3...  fluxwave_0.5.5.apk"
+        final line = body.trim().split('\n').first.trim();
+        final hash = line.split(RegExp(r'\s+')).first.trim().toLowerCase();
+        // 校验是否为 64 位十六进制字符串
+        if (hash.length == 64 && RegExp(r'^[0-9a-f]{64}$').hasMatch(hash)) {
+          return hash;
+        }
+        return null;
+      } finally {
+        client.close();
+      }
+    } catch (e, st) {
+      AppLog.warn('获取 SHA256 失败', tag: 'update', error: e, stack: st);
+      return null;
+    }
+  }
+
+  /// 校验文件 SHA256。返回 null 表示校验通过，否则返回错误信息。
+  ///
+  /// [expectedHash] 为 null 表示无校验文件（跳过校验）；
+  /// 为空字符串表示校验文件内容无效（视为失败）。
+  Future<String?> verifySha256({
+    required String filePath,
+    required String? expectedHash,
+  }) async {
+    if (expectedHash == null) {
+      return null; // 无校验文件，跳过校验
+    }
+
+    if (expectedHash.isEmpty) {
+      return 'SHA256 校验文件内容无效';
+    }
+
+    final actualHash = await computeFileSha256(filePath);
+    if (actualHash != expectedHash) {
+      // 校验失败，删除已下载文件
+      try {
+        await File(filePath).delete();
+      } catch (_) {}
+      return 'SHA256 校验失败：文件可能已损坏或被篡改\n期望：$expectedHash\n实际：$actualHash';
+    }
+    return null;
+  }
 }
 
 /// 更新信息。
@@ -268,6 +337,7 @@ class UpdateInfo {
   final String? releaseNotes;
   final String releaseUrl;
   final String? downloadUrl;
+  final String? sha256Url;
   final String? publishedAt;
   final bool isPrerelease;
 
@@ -283,6 +353,7 @@ class UpdateInfo {
     this.releaseNotes,
     required this.releaseUrl,
     this.downloadUrl,
+    this.sha256Url,
     this.publishedAt,
     this.isPrerelease = false,
     this.changelogEntries = const {},
@@ -291,6 +362,9 @@ class UpdateInfo {
 
   /// 是否有可下载的 APK 资源。
   bool get hasDownload => downloadUrl != null && downloadUrl!.isNotEmpty;
+
+  /// 是否有 SHA256 校验文件。
+  bool get hasSha256 => sha256Url != null && sha256Url!.isNotEmpty;
 
   /// 是否有来自 CHANGELOG.md 的更新日志。
   bool get hasChangelog => skippedChangelogs.isNotEmpty;
@@ -307,6 +381,7 @@ class _GitHubRelease {
   final String? publishedAt;
   final bool isPrerelease;
   final String? downloadUrl;
+  final String? sha256Url;
 
   const _GitHubRelease({
     required this.tagName,
@@ -315,18 +390,22 @@ class _GitHubRelease {
     this.publishedAt,
     this.isPrerelease = false,
     this.downloadUrl,
+    this.sha256Url,
   });
 
   factory _GitHubRelease.fromJson(Map<String, dynamic> json) {
-    // 从 assets 中查找 APK 文件的下载链接
+    // 从 assets 中查找 APK 和 SHA256 校验文件的下载链接
     String? apkUrl;
+    String? sha256Url;
     final assets = json['assets'] as List?;
     if (assets != null) {
       for (final asset in assets) {
         final name = asset['name'] as String? ?? '';
-        if (name.toLowerCase().endsWith('.apk')) {
+        final lowerName = name.toLowerCase();
+        if (lowerName.endsWith('.apk')) {
           apkUrl = asset['browser_download_url'] as String?;
-          break;
+        } else if (lowerName.endsWith('.sha256')) {
+          sha256Url = asset['browser_download_url'] as String?;
         }
       }
     }
@@ -338,6 +417,7 @@ class _GitHubRelease {
       publishedAt: json['published_at'] as String?,
       isPrerelease: json['prerelease'] as bool? ?? false,
       downloadUrl: apkUrl,
+      sha256Url: sha256Url,
     );
   }
 }
