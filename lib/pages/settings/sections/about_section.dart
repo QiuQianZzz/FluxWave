@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/app_build_info.dart';
 import '../../../constants/app_links.dart';
+import '../../../core/contributor_service.dart';
 import '../../../core/update_service.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/app_toast.dart';
@@ -117,6 +118,9 @@ class AboutSection extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        // ── 开发者 ──
+        const _ContributorsSection(),
         const SizedBox(height: 8),
         // ── 致谢 ──
         SectionCard(
@@ -342,6 +346,195 @@ class _UpdateTileState extends State<_UpdateTile> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 开发者 section：从 GitHub API 动态拉取贡献者列表。
+class _ContributorsSection extends StatefulWidget {
+  const _ContributorsSection();
+
+  @override
+  State<_ContributorsSection> createState() => _ContributorsSectionState();
+}
+
+class _ContributorsSectionState extends State<_ContributorsSection> {
+  List<Contributor>? _contributors;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final contributors = await ContributorService.instance.getContributors(
+        maxCount: 10,
+      );
+      if (!mounted) return;
+      setState(() => _contributors = contributors);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '加载失败');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return SectionCard(
+      icon: Icons.people_rounded,
+      title: '贡献者',
+      children: [
+        // 加载中
+        if (_contributors == null && _error == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        // 错误
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.error_outline, size: 16, color: cs.error),
+                const SizedBox(width: 8),
+                Text(
+                  _error!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: _load,
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+        // 贡献者列表
+        if (_contributors != null) ...[
+          if (_contributors!.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                '暂无贡献者数据',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            )
+          else
+            ..._contributors!.map((c) => _ContributorTile(contributor: c)),
+          // 查看完整列表
+          if (_contributors!.isNotEmpty) ...[
+            const Divider(height: 16),
+            InkWell(
+              onTap: () => launchUrl(
+                Uri.parse(AppLinks.kContributorsPageUrl),
+              ),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.open_in_new_rounded,
+                      size: 16,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '查看完整贡献者列表',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'GitHub',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 16,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+/// 单个贡献者条目：头像 + 用户名 + 贡献数。
+class _ContributorTile extends StatelessWidget {
+  final Contributor contributor;
+
+  const _ContributorTile({required this.contributor});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return InkWell(
+      onTap: () => launchUrl(Uri.parse(contributor.htmlUrl)),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            // 头像
+            CircleAvatar(
+              radius: 20,
+              backgroundImage: NetworkImage(contributor.avatarUrl),
+              backgroundColor: cs.surfaceContainerHighest,
+            ),
+            const SizedBox(width: 12),
+            // 用户名 + 贡献数
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    contributor.login,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    '${contributor.contributions} commits',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
     );
   }
 }

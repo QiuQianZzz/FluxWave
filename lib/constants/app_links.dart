@@ -26,6 +26,14 @@ class AppLinks {
   static String get kReleasesApiUrl =>
       'https://api.github.com/repos/$githubOwner/$githubRepo/releases';
 
+  /// GitHub API：贡献者列表。
+  static String get kContributorsApiUrl =>
+      'https://api.github.com/repos/$githubOwner/$githubRepo/contributors';
+
+  /// GitHub：完整贡献者列表页面。
+  static String get kContributorsPageUrl =>
+      '$kGitHubRepoUrl/graphs/contributors';
+
   // ── 文档 ──
 
   /// 项目文档站。
