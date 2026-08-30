@@ -6,10 +6,12 @@
 
 ## [Unreleased]
 
+## [v0.5.5] - 2026-08-31
+
 ### 新增
 
-- 应用内 APK 下载更新功能，支持下载进度显示与一键安装
-- 版本级 APK 缓存，已下载版本跳过重复下载，自动清理旧版本文件
+- 应用内 APK 下载更新功能，支持下载进度显示与 SHA256 校验后一键安装
+- 跨版本更新日志展示，从 CHANGELOG.md 解析并显示跳过的所有版本变更
 - 关于页贡献者展示模块，从 GitHub API 动态拉取贡献者列表
 
 ## [v0.5.4] - 2026-08-25
@@ -148,13 +150,14 @@
 
 ---
 
-[Unreleased]: https://github.com/jodexd/fluxwave/compare/v0.5.4...HEAD
-[v0.5.4]: https://github.com/jodexd/fluxwave/compare/v0.5.3...v0.5.4
-[v0.5.3]: https://github.com/jodexd/fluxwave/compare/v0.5.2...v0.5.3
-[v0.5.2]: https://github.com/jodexd/fluxwave/compare/v0.5.1...v0.5.2
-[v0.5.1]: https://github.com/jodexd/fluxwave/compare/v0.5.0...v0.5.1
-[v0.5.0]: https://github.com/jodexd/fluxwave/compare/v0.4.0...v0.5.0
-[v0.4.0]: https://github.com/jodexd/fluxwave/compare/v0.3.0...v0.4.0
-[v0.3.0]: https://github.com/jodexd/fluxwave/compare/v0.2.0...v0.3.0
-[v0.2.0]: https://github.com/jodexd/fluxwave/compare/v0.1.0...v0.2.0
-[v0.1.0]: https://github.com/jodexd/fluxwave/releases/tag/v0.1.0
+[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.5...HEAD
+[v0.5.5]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.4...v0.5.5
+[v0.5.4]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.3...v0.5.4
+[v0.5.3]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.2...v0.5.3
+[v0.5.2]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.1...v0.5.2
+[v0.5.1]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.0...v0.5.1
+[v0.5.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.4.0...v0.5.0
+[v0.4.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.3.0...v0.4.0
+[v0.3.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.2.0...v0.3.0
+[v0.2.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.1.0...v0.2.0
+[v0.1.0]: https://github.com/QiuQianZzz/FluxWave/releases/tag/v0.1.0
