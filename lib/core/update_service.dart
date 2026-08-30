@@ -1,14 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'logging/app_log.dart';
 
 /// GitHub Release 更新检测服务。
 ///
 /// 调用 GitHub API 获取最新 release，与本地版本比较，返回 [UpdateInfo]。
-/// 不做自动下载，仅提供 release 页面链接供用户手动下载。
+/// 支持应用内下载 APK 并触发系统安装。
 class UpdateService {
   UpdateService._();
 
@@ -44,6 +46,7 @@ class UpdateService {
           latestVersion: _stripVersionPrefix(release.tagName),
           releaseNotes: release.body,
           releaseUrl: release.htmlUrl,
+          downloadUrl: release.downloadUrl,
           publishedAt: release.publishedAt,
           isPrerelease: release.isPrerelease,
         );
@@ -55,13 +58,68 @@ class UpdateService {
     }
   }
 
+  /// 下载 APK 文件到临时目录。返回文件路径。
+  ///
+  /// [onProgress] 回调下载进度（0.0 ~ 1.0）。
+  /// 下载过程中会频繁回调，UI 层应节流更新（建议 ≥100ms 间隔）。
+  Future<String> downloadApk(
+    String url, {
+    Function(double progress)? onProgress,
+  }) async {
+    final dir = await getTemporaryDirectory();
+    final filePath = '${dir.path}/fluxwave_update.apk';
+    final file = File(filePath);
+
+    // 删除旧的下载文件
+    if (await file.exists()) {
+      await file.delete();
+    }
+
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30);
+
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      request.headers.set('User-Agent', 'FluxWave/1.0');
+      request.headers.set('Cache-Control', 'no-cache');
+      final response = await request.close();
+
+      if (response.statusCode != 200) {
+        throw HttpException(
+          '下载失败: HTTP ${response.statusCode}',
+          uri: Uri.parse(url),
+        );
+      }
+
+      final totalBytes = response.contentLength;
+      var receivedBytes = 0;
+
+      final sink = file.openWrite();
+      await for (final chunk in response) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          onProgress?.call(receivedBytes / totalBytes);
+        }
+      }
+      await sink.flush();
+      await sink.close();
+
+      return filePath;
+    } finally {
+      client.close();
+    }
+  }
+
   /// 获取最新正式版 release。
   Future<_GitHubRelease?> _fetchLatestStable() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
     try {
       final request = await client.getUrl(Uri.parse(_latestUrl));
       request.headers.set('Accept', 'application/vnd.github.v3+json');
       request.headers.set('User-Agent', 'FluxWave/1.0');
+      request.headers.set('Cache-Control', 'no-cache');
       final response = await request.close();
       if (response.statusCode != 200) return null;
       final body = await response.transform(utf8.decoder).join();
@@ -74,13 +132,15 @@ class UpdateService {
 
   /// 获取最新 release（含预发布）：拉取最近 10 条，取第一条。
   Future<_GitHubRelease?> _fetchLatestIncludingPrerelease() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
     try {
       final request = await client.getUrl(
         Uri.parse('$_releasesUrl?per_page=10'),
       );
       request.headers.set('Accept', 'application/vnd.github.v3+json');
       request.headers.set('User-Agent', 'FluxWave/1.0');
+      request.headers.set('Cache-Control', 'no-cache');
       final response = await request.close();
       if (response.statusCode != 200) return null;
       final body = await response.transform(utf8.decoder).join();
@@ -129,6 +189,7 @@ class UpdateInfo {
   final String latestVersion;
   final String? releaseNotes;
   final String releaseUrl;
+  final String? downloadUrl;
   final String? publishedAt;
   final bool isPrerelease;
 
@@ -137,9 +198,13 @@ class UpdateInfo {
     required this.latestVersion,
     this.releaseNotes,
     required this.releaseUrl,
+    this.downloadUrl,
     this.publishedAt,
     this.isPrerelease = false,
   });
+
+  /// 是否有可下载的 APK 资源。
+  bool get hasDownload => downloadUrl != null && downloadUrl!.isNotEmpty;
 }
 
 /// GitHub Release API 响应的最小解析。
@@ -149,6 +214,7 @@ class _GitHubRelease {
   final String htmlUrl;
   final String? publishedAt;
   final bool isPrerelease;
+  final String? downloadUrl;
 
   const _GitHubRelease({
     required this.tagName,
@@ -156,14 +222,30 @@ class _GitHubRelease {
     required this.htmlUrl,
     this.publishedAt,
     this.isPrerelease = false,
+    this.downloadUrl,
   });
 
-  factory _GitHubRelease.fromJson(Map<String, dynamic> json) =>
-      _GitHubRelease(
-        tagName: json['tag_name'] as String? ?? '',
-        body: json['body'] as String?,
-        htmlUrl: json['html_url'] as String? ?? '',
-        publishedAt: json['published_at'] as String?,
-        isPrerelease: json['prerelease'] as bool? ?? false,
-      );
+  factory _GitHubRelease.fromJson(Map<String, dynamic> json) {
+    // 从 assets 中查找 APK 文件的下载链接
+    String? apkUrl;
+    final assets = json['assets'] as List?;
+    if (assets != null) {
+      for (final asset in assets) {
+        final name = asset['name'] as String? ?? '';
+        if (name.toLowerCase().endsWith('.apk')) {
+          apkUrl = asset['browser_download_url'] as String?;
+          break;
+        }
+      }
+    }
+
+    return _GitHubRelease(
+      tagName: json['tag_name'] as String? ?? '',
+      body: json['body'] as String?,
+      htmlUrl: json['html_url'] as String? ?? '',
+      publishedAt: json['published_at'] as String?,
+      isPrerelease: json['prerelease'] as bool? ?? false,
+      downloadUrl: apkUrl,
+    );
+  }
 }

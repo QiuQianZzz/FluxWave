@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:open_file/open_file.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/update_service.dart';
+import '../core/logging/app_log.dart';
 
-/// 更新弹窗：展示版本对比 + Markdown 渲染的更新日志 + 跳转 GitHub Releases。
+/// 更新弹窗：展示版本对比 + Markdown 渲染的更新日志 + 下载安装。
 ///
 /// 宽屏居中限宽 480，窄屏自适应全宽；版本标签行溢出时自动换行。
-class UpdateDialog extends StatelessWidget {
+class UpdateDialog extends StatefulWidget {
   final UpdateInfo info;
 
   const UpdateDialog({super.key, required this.info});
@@ -20,11 +22,67 @@ class UpdateDialog extends StatelessWidget {
   }
 
   @override
+  State<UpdateDialog> createState() => _UpdateDialogState();
+}
+
+class _UpdateDialogState extends State<UpdateDialog> {
+  double? _progress;
+  bool _downloading = false;
+  String? _error;
+
+  bool get _hasDownload => widget.info.hasDownload;
+
+  Future<void> _downloadAndInstall() async {
+    if (_downloading) return;
+    setState(() {
+      _downloading = true;
+      _progress = 0;
+      _error = null;
+    });
+
+    try {
+      final filePath = await UpdateService.instance.downloadApk(
+        widget.info.downloadUrl!,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+
+      if (!mounted) return;
+      setState(() => _progress = 1.0);
+
+      // 短暂显示完成状态后打开安装界面
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+
+      final result = await OpenFile.open(filePath);
+      if (result.type != ResultType.done) {
+        AppLog.warn('打开 APK 失败', tag: 'update', error: result.message);
+        if (mounted) {
+          setState(() => _error = '无法打开安装文件：${result.message}');
+        }
+        return;
+      }
+
+      // 成功打开安装界面，关闭弹窗
+      if (mounted) Navigator.of(context).pop();
+    } catch (e, st) {
+      AppLog.warn('下载失败', tag: 'update', error: e, stack: st);
+      if (mounted) {
+        setState(() => _error = '下载失败：$e');
+      }
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final dialogWidth = screenWidth < 480 ? screenWidth - 32 : 480.0;
+    final info = widget.info;
 
     return Dialog(
       backgroundColor: cs.surface,
@@ -178,63 +236,97 @@ class UpdateDialog extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  // 更新日志标题
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.description_outlined,
-                        size: 16,
-                        color: cs.onSurfaceVariant,
+                  // 下载进度
+                  if (_downloading) ...[
+                    _buildDownloadProgress(theme, cs),
+                    const SizedBox(height: 12),
+                  ],
+                  // 错误提示
+                  if (_error != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: cs.errorContainer,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '更新日志',
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline, size: 20, color: cs.error),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _error!,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: cs.onErrorContainer,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  // 更新日志内容
-                  Container(
-                    constraints: const BoxConstraints(maxHeight: 320),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: info.releaseNotes != null &&
-                              info.releaseNotes!.trim().isNotEmpty
-                          ? SingleChildScrollView(
-                              padding: const EdgeInsets.all(14),
-                              child: MarkdownBody(
-                                data: info.releaseNotes!,
-                                selectable: true,
-                                styleSheet: _buildMarkdownStyle(theme, cs),
-                                onTapLink: (text, href, title) {
-                                  if (href != null) launchUrl(Uri.parse(href));
-                                },
-                              ),
-                            )
-                          : Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 24,
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '暂无更新日志',
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: cs.onSurfaceVariant,
+                    const SizedBox(height: 12),
+                  ],
+                  // 更新日志标题
+                  if (!_downloading) ...[
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.description_outlined,
+                          size: 16,
+                          color: cs.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '更新日志',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: cs.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // 更新日志内容
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 320),
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: info.releaseNotes != null &&
+                                info.releaseNotes!.trim().isNotEmpty
+                            ? SingleChildScrollView(
+                                padding: const EdgeInsets.all(14),
+                                child: MarkdownBody(
+                                  data: info.releaseNotes!,
+                                  selectable: true,
+                                  styleSheet: _buildMarkdownStyle(theme, cs),
+                                  onTapLink: (text, href, title) {
+                                    if (href != null) {
+                                      launchUrl(Uri.parse(href));
+                                    }
+                                  },
+                                ),
+                              )
+                            : Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 24,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '暂无更新日志',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -245,7 +337,9 @@ class UpdateDialog extends StatelessWidget {
                 children: [
                   Expanded(
                     child: TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: _downloading
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
@@ -255,15 +349,24 @@ class UpdateDialog extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: () {
-                        launchUrl(Uri.parse(info.releaseUrl));
-                        Navigator.of(context).pop();
-                      },
+                      onPressed: _downloading
+                          ? null
+                          : (_hasDownload
+                              ? _downloadAndInstall
+                              : () {
+                                  launchUrl(Uri.parse(info.releaseUrl));
+                                  Navigator.of(context).pop();
+                                }),
                       style: FilledButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                      label: const Text('前往 GitHub'),
+                      icon: Icon(
+                        _hasDownload
+                            ? Icons.download_rounded
+                            : Icons.open_in_new_rounded,
+                        size: 18,
+                      ),
+                      label: Text(_hasDownload ? '下载并安装' : '前往 GitHub'),
                     ),
                   ),
                 ],
@@ -272,6 +375,37 @@ class UpdateDialog extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildDownloadProgress(ThemeData theme, ColorScheme cs) {
+    final percent = _progress != null ? (_progress! * 100).toStringAsFixed(0) : '0';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.downloading_rounded, size: 16, color: cs.primary),
+            const SizedBox(width: 6),
+            Text(
+              '正在下载 APK… $percent%',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: _progress,
+            minHeight: 6,
+            backgroundColor: cs.surfaceContainerHighest,
+          ),
+        ),
+      ],
     );
   }
 
@@ -295,7 +429,10 @@ class UpdateDialog extends StatelessWidget {
       codeblockPadding: const EdgeInsets.all(12),
       blockquoteDecoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: cs.primary.withValues(alpha: 0.5), width: 3),
+          left: BorderSide(
+            color: cs.primary.withValues(alpha: 0.5),
+            width: 3,
+          ),
         ),
       ),
       blockquotePadding: const EdgeInsets.only(left: 12),
