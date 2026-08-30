@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as p;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -80,10 +81,31 @@ class UpdateService {
   /// 检查是否已有指定版本的下载好的 APK 文件。
   Future<bool> hasDownloadedApk(String version) async {
     final dir = await _getTempDir();
-    final file = File('$dir/fluxwave_${_normalizeVersion(version)}.apk');
+    final file = File(p.join(dir, 'fluxwave_${_normalizeVersion(version)}.apk'));
     if (!await file.exists()) return false;
     final size = await file.length();
     return size > 0;
+  }
+
+  /// 清理临时目录中所有旧的 APK 文件。
+  ///
+  /// 在下载新版本前调用，确保始终最多只有一个安装包缓存。
+  Future<void> cleanOldApks() async {
+    try {
+      final dir = await _getTempDir();
+      final dirObj = Directory(dir);
+      if (!await dirObj.exists()) return;
+      final prefix = p.join(dir, 'fluxwave_');
+      await for (final entity in dirObj.list()) {
+        if (entity is File &&
+            entity.path.startsWith(prefix) &&
+            entity.path.endsWith('.apk')) {
+          try {
+            await entity.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 
   /// 下载 APK 文件到临时目录。返回文件路径。
@@ -99,7 +121,7 @@ class UpdateService {
   }) async {
     final dir = await _getTempDir();
     final v = version != null ? _normalizeVersion(version) : 'latest';
-    final filePath = '$dir/fluxwave_$v.apk';
+    final filePath = p.join(dir, 'fluxwave_$v.apk');
     final file = File(filePath);
 
     // 文件已存在且不强制重下：跳过下载，直接返回
@@ -119,11 +141,12 @@ class UpdateService {
     }
 
     // 清理其他版本的旧 APK 文件（失败不影响下载）
+    final prefix = p.join(dir, 'fluxwave_');
     final dirObj = Directory(dir);
     if (await dirObj.exists()) {
       await for (final entity in dirObj.list()) {
         if (entity is File &&
-            entity.path.startsWith('$dir/fluxwave_') &&
+            entity.path.startsWith(prefix) &&
             entity.path.endsWith('.apk') &&
             entity.path != filePath) {
           try {

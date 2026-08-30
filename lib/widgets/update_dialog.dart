@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:open_file/open_file.dart';
@@ -57,9 +59,15 @@ class _UpdateDialogState extends State<UpdateDialog> {
     });
 
     try {
+      // 下载前清理旧版本 APK
+      if (!_apkExists) {
+        await UpdateService.instance.cleanOldApks();
+      }
+
       final filePath = await UpdateService.instance.downloadApk(
         widget.info.downloadUrl!,
         version: widget.info.latestVersion,
+        forceReDownload: !_apkExists,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
@@ -103,6 +111,11 @@ class _UpdateDialogState extends State<UpdateDialog> {
         }
         return;
       }
+
+      // 安装成功，清理已安装的 APK
+      try {
+        await File(filePath).delete();
+      } catch (_) {}
 
       // 成功打开安装界面，关闭弹窗
       if (mounted) Navigator.of(context).pop();
