@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/app_build_info.dart';
-import '../../../core/app_links.dart';
+import '../../../constants/app_links.dart';
 import '../../../core/update_service.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/app_toast.dart';

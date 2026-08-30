@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'app_links.dart';
+import '../constants/app_links.dart';
 import 'logging/app_log.dart';
 
 /// GitHub Release 更新检测服务。
