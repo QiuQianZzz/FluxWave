@@ -119,7 +119,7 @@ class AboutSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        // ── 开发者 ──
+        // ── 贡献者 ──
         const _ContributorsSection(),
         const SizedBox(height: 8),
         // ── 致谢 ──
@@ -365,7 +365,9 @@ class _ContributorsSectionState extends State<_ContributorsSection> {
   @override
   void initState() {
     super.initState();
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _load();
+    });
   }
 
   Future<void> _load() async {

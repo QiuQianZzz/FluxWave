@@ -101,8 +101,8 @@ class ContributorService {
         error: e,
         stack: st,
       );
-      _loading!.completeError(e, st);
-      rethrow;
+      _loading!.complete([]);
+      return [];
     } finally {
       _loading = null;
     }
