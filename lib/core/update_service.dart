@@ -99,12 +99,14 @@ class UpdateService {
       }
     }
 
-    // 删除旧的下载文件（同一版本或其他版本）
+    // 删除旧的下载文件（删不掉不影响后续写入）
     if (await file.exists()) {
-      await file.delete();
+      try {
+        await file.delete();
+      } catch (_) {}
     }
 
-    // 清理其他版本的旧 APK 文件
+    // 清理其他版本的旧 APK 文件（失败不影响下载）
     final dirObj = Directory(dir);
     if (await dirObj.exists()) {
       await for (final entity in dirObj.list()) {
@@ -112,7 +114,9 @@ class UpdateService {
             entity.path.startsWith('$dir/fluxwave_') &&
             entity.path.endsWith('.apk') &&
             entity.path != filePath) {
-          await entity.delete();
+          try {
+            await entity.delete();
+          } catch (_) {}
         }
       }
     }
