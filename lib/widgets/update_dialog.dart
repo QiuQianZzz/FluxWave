@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:open_file/open_file.dart';
@@ -105,19 +103,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
 
       final result = await OpenFile.open(filePath);
       if (result.type != ResultType.done) {
-        AppLog.warn('打开 APK 失败', tag: 'update', error: result.message);
+        AppLog.warn('打开 APK 失败: ${result.message}', tag: 'update');
         if (mounted) {
           setState(() => _error = '无法打开安装文件：${result.message}');
         }
         return;
       }
 
-      // 安装成功，清理已安装的 APK
-      try {
-        await File(filePath).delete();
-      } catch (_) {}
-
-      // 成功打开安装界面，关闭弹窗
+      // 成功打开安装界面，关闭弹窗（不删除 APK，系统安装器仍需要该文件）
       if (mounted) Navigator.of(context).pop();
     } catch (e, st) {
       AppLog.warn('下载失败', tag: 'update', error: e, stack: st);

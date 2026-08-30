@@ -140,9 +140,6 @@ class UpdateService {
       } catch (_) {}
     }
 
-    // 清理其他版本的旧 APK 文件（失败不影响下载）
-    await cleanOldApks();
-
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30);
 
