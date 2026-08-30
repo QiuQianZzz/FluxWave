@@ -9,14 +9,15 @@ class AppLinks {
 
   static const githubOwner = 'QiuQianZzz';
   static const githubRepo = 'FluxWave';
+  static const githubBranch = 'master';
 
   /// 仓库主页。
   static const kGitHubRepoUrl =
       'https://github.com/$githubOwner/$githubRepo';
 
-  /// LICENSE 文件的 raw 内容地址（main 分支）。
+  /// LICENSE 文件的 raw 内容地址。
   static const kLicenseUrl =
-      'https://raw.githubusercontent.com/$githubOwner/$githubRepo/main/LICENSE';
+      'https://raw.githubusercontent.com/$githubOwner/$githubRepo/$githubBranch/LICENSE';
 
   /// GitHub API：最新 release（正式版）。
   static String get kLatestReleaseApiUrl =>
@@ -34,9 +35,9 @@ class AppLinks {
   static String get kContributorsPageUrl =>
       '$kGitHubRepoUrl/graphs/contributors';
 
-  /// GitHub raw：CHANGELOG.md 内容（main 分支）。
+  /// GitHub raw：CHANGELOG.md 内容。
   static const kChangelogUrl =
-      'https://raw.githubusercontent.com/$githubOwner/$githubRepo/main/CHANGELOG.md';
+      'https://raw.githubusercontent.com/$githubOwner/$githubRepo/$githubBranch/CHANGELOG.md';
 
   // ── 文档 ──
 

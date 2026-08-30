@@ -6,7 +6,7 @@ class ChangelogParser {
 
   /// 解析 CHANGELOG.md 内容，返回版本号 -> 更新日志内容的映射。
   ///
-  /// 版本号格式为 `v0.5.4`（带 v 前缀），`Unreleased` 对应未发布版本。
+  /// 版本号格式为 `0.5.4`（无 v 前缀），`Unreleased` 对应未发布版本。
   /// 返回的 Markdown 内容保留原始格式（含标题和列表）。
   static Map<String, String> parse(String content) {
     final entries = <String, String>{};
@@ -26,7 +26,12 @@ class ChangelogParser {
             entries[currentVersion] = text;
           }
         }
-        currentVersion = versionMatch.group(1);
+        // 去掉 v/V 前缀
+        var rawVersion = versionMatch.group(1)!;
+        if (rawVersion.startsWith('v') || rawVersion.startsWith('V')) {
+          rawVersion = rawVersion.substring(1);
+        }
+        currentVersion = rawVersion;
         currentContent.clear();
         // 不添加版本标题行本身，只添加内容
         continue;
@@ -80,26 +85,14 @@ class ChangelogParser {
         continue;
       }
 
-      // 规范化版本号（去掉 v 前缀和预发布后缀）后再比较
-      final normalized = _normalizeVersion(version);
-
       // 比较版本号：需要在 current 和 latest 之间（不含 current，含 latest）
-      if (_isNewer(normalized, current) &&
-          !_isNewer(normalized, latest)) {
+      if (_isNewer(version, current) &&
+          !_isNewer(version, latest)) {
         result.add((version, changelogEntries[version]!));
       }
     }
 
     return result;
-  }
-
-  /// 规范化版本号：去掉 v 前缀和预发布后缀（-beta.1 等）。
-  static String _normalizeVersion(String version) {
-    var v = version.trim();
-    if (v.startsWith('v') || v.startsWith('V')) v = v.substring(1);
-    final dashIndex = v.indexOf('-');
-    if (dashIndex != -1) v = v.substring(0, dashIndex);
-    return v;
   }
 
   /// 将版本号列表按语义化版本从新到旧排序。
