@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:open_file/open_file.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/platform_utils.dart';
 import '../core/update_service.dart';
 import '../core/logging/app_log.dart';
 
@@ -32,7 +33,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
   String? _error;
   bool _apkExists = false;
 
-  bool get _hasDownload => widget.info.hasDownload;
+  bool get _hasDownload => widget.info.hasDownload && PlatformUtils.isAndroid;
 
   @override
   void initState() {
