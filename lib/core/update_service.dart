@@ -20,6 +20,16 @@ class UpdateService {
 
   static final instance = UpdateService._();
 
+  /// 获取更新下载目录（专属子文件夹，避免污染临时目录根目录）。
+  Future<String> _getUpdateDir() async {
+    final tempDir = await getTemporaryDirectory();
+    final updateDir = Directory('${tempDir.path}${p.separator}fluxwave_updates');
+    if (!await updateDir.exists()) {
+      await updateDir.create(recursive: true);
+    }
+    return updateDir.path;
+  }
+
   /// 检查是否有新版本。返回 null 表示已是最新或检查失败。
   ///
   /// [includeBeta] 为 true 时检查所有 release（含预发布），
@@ -71,35 +81,25 @@ class UpdateService {
     }
   }
 
-  String? _tempDir;
-
-  Future<String> _getTempDir() async {
-    _tempDir ??= (await getTemporaryDirectory()).path;
-    return _tempDir!;
-  }
-
   /// 检查是否已有指定版本的下载好的 APK 文件。
   Future<bool> hasDownloadedApk(String version) async {
-    final dir = await _getTempDir();
+    final dir = await _getUpdateDir();
     final file = File(p.join(dir, 'fluxwave_${_normalizeVersion(version)}.apk'));
     if (!await file.exists()) return false;
     final size = await file.length();
     return size > 0;
   }
 
-  /// 清理临时目录中所有旧的 APK 文件。
+  /// 清理更新目录中所有旧的 APK 文件。
   ///
   /// 在下载新版本前调用，确保始终最多只有一个安装包缓存。
   Future<void> cleanOldApks() async {
     try {
-      final dir = await _getTempDir();
+      final dir = await _getUpdateDir();
       final dirObj = Directory(dir);
       if (!await dirObj.exists()) return;
-      final prefix = p.join(dir, 'fluxwave_');
       await for (final entity in dirObj.list()) {
-        if (entity is File &&
-            entity.path.startsWith(prefix) &&
-            entity.path.endsWith('.apk')) {
+        if (entity is File && entity.path.endsWith('.apk')) {
           try {
             await entity.delete();
           } catch (_) {}
@@ -119,7 +119,7 @@ class UpdateService {
     bool forceReDownload = false,
     Function(double progress)? onProgress,
   }) async {
-    final dir = await _getTempDir();
+    final dir = await _getUpdateDir();
     final v = version != null ? _normalizeVersion(version) : 'latest';
     final filePath = p.join(dir, 'fluxwave_$v.apk');
     final file = File(filePath);
@@ -141,20 +141,7 @@ class UpdateService {
     }
 
     // 清理其他版本的旧 APK 文件（失败不影响下载）
-    final prefix = p.join(dir, 'fluxwave_');
-    final dirObj = Directory(dir);
-    if (await dirObj.exists()) {
-      await for (final entity in dirObj.list()) {
-        if (entity is File &&
-            entity.path.startsWith(prefix) &&
-            entity.path.endsWith('.apk') &&
-            entity.path != filePath) {
-          try {
-            await entity.delete();
-          } catch (_) {}
-        }
-      }
-    }
+    await cleanOldApks();
 
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30);
