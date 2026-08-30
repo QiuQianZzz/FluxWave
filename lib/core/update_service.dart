@@ -58,21 +58,63 @@ class UpdateService {
     }
   }
 
+  String? _tempDir;
+
+  Future<String> _getTempDir() async {
+    _tempDir ??= (await getTemporaryDirectory()).path;
+    return _tempDir!;
+  }
+
+  /// 检查是否已有指定版本的下载好的 APK 文件。
+  Future<bool> hasDownloadedApk(String version) async {
+    final dir = await _getTempDir();
+    final file = File('$dir/fluxwave_${_normalizeVersion(version)}.apk');
+    if (!await file.exists()) return false;
+    final size = await file.length();
+    return size > 0;
+  }
+
   /// 下载 APK 文件到临时目录。返回文件路径。
   ///
+  /// 如果已存在有效的下载文件，直接返回路径（跳过重复下载）。
+  /// [forceReDownload] 为 true 时强制重新下载。
   /// [onProgress] 回调下载进度（0.0 ~ 1.0）。
-  /// 下载过程中会频繁回调，UI 层应节流更新（建议 ≥100ms 间隔）。
   Future<String> downloadApk(
     String url, {
+    String? version,
+    bool forceReDownload = false,
     Function(double progress)? onProgress,
   }) async {
-    final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/fluxwave_update.apk';
+    final dir = await _getTempDir();
+    final v = version != null ? _normalizeVersion(version) : 'latest';
+    final filePath = '$dir/fluxwave_$v.apk';
     final file = File(filePath);
 
-    // 删除旧的下载文件
+    // 文件已存在且不强制重下：跳过下载，直接返回
+    if (!forceReDownload && await file.exists()) {
+      final size = await file.length();
+      if (size > 0) {
+        onProgress?.call(1.0);
+        return filePath;
+      }
+    }
+
+    // 删除旧的下载文件（同一版本或其他版本）
     if (await file.exists()) {
       await file.delete();
+    }
+
+    // 清理其他版本的旧 APK 文件
+    final dirObj = Directory(dir);
+    if (await dirObj.exists()) {
+      await for (final entity in dirObj.list()) {
+        if (entity is File &&
+            entity.path.startsWith('$dir/fluxwave_') &&
+            entity.path.endsWith('.apk') &&
+            entity.path != filePath) {
+          await entity.delete();
+        }
+      }
     }
 
     final client = HttpClient()

@@ -29,20 +29,35 @@ class _UpdateDialogState extends State<UpdateDialog> {
   double? _progress;
   bool _downloading = false;
   String? _error;
+  bool _apkExists = false;
 
   bool get _hasDownload => widget.info.hasDownload;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingApk();
+  }
+
+  Future<void> _checkExistingApk() async {
+    final exists = await UpdateService.instance.hasDownloadedApk(
+      widget.info.latestVersion,
+    );
+    if (mounted) setState(() => _apkExists = exists);
+  }
 
   Future<void> _downloadAndInstall() async {
     if (_downloading) return;
     setState(() {
       _downloading = true;
-      _progress = 0;
+      _progress = _apkExists ? 1.0 : 0;
       _error = null;
     });
 
     try {
       final filePath = await UpdateService.instance.downloadApk(
         widget.info.downloadUrl!,
+        version: widget.info.latestVersion,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
@@ -362,11 +377,17 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       ),
                       icon: Icon(
                         _hasDownload
-                            ? Icons.download_rounded
+                            ? (_apkExists
+                                ? Icons.install_mobile_rounded
+                                : Icons.download_rounded)
                             : Icons.open_in_new_rounded,
                         size: 18,
                       ),
-                      label: Text(_hasDownload ? '下载并安装' : '前往 GitHub'),
+                      label: Text(
+                        _hasDownload
+                            ? (_apkExists ? '安装' : '下载并安装')
+                            : '前往 GitHub',
+                      ),
                     ),
                   ),
                 ],
