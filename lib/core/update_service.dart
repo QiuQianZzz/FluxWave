@@ -6,6 +6,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../constants/app_links.dart';
+import 'changelog_parser.dart';
 import 'logging/app_log.dart';
 
 /// GitHub Release 更新检测服务。
@@ -35,6 +36,19 @@ class UpdateService {
       final current = _normalizeVersion(currentVersion);
 
       if (_isNewer(latestVersion, current)) {
+        // 异步获取 CHANGELOG.md，不阻塞更新检测
+        final changelogEntries = await _fetchChangelog().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => <String, String>{},
+        );
+        final skippedChangelogs = changelogEntries.isNotEmpty
+            ? ChangelogParser.extractSkipped(
+                changelogEntries,
+                current,
+                latestVersion,
+              )
+            : <(String, String)>[];
+
         return UpdateInfo(
           currentVersion: currentVersion,
           latestVersion: _stripVersionPrefix(release.tagName),
@@ -43,6 +57,8 @@ class UpdateService {
           downloadUrl: release.downloadUrl,
           publishedAt: release.publishedAt,
           isPrerelease: release.isPrerelease,
+          changelogEntries: changelogEntries,
+          skippedChangelogs: skippedChangelogs,
         );
       }
       return null;
@@ -192,13 +208,35 @@ class UpdateService {
     }
   }
 
-  /// 从版本字符串中提取可比较的版本号（去掉 v 前缀和预发布后缀）。
+  /// 从版本号字符串中提取可比较的版本号（去掉 v 前缀和预发布后缀）。
   String _normalizeVersion(String version) {
     var v = _stripVersionPrefix(version);
     // 去掉预发布后缀（-beta.1, -rc.2 等）只比较主版本号
     final dashIndex = v.indexOf('-');
     if (dashIndex != -1) v = v.substring(0, dashIndex);
     return v;
+  }
+
+  /// 从 GitHub 获取 CHANGELOG.md 并解析。
+  Future<Map<String, String>> _fetchChangelog() async {
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 10);
+      try {
+        final request = await client.getUrl(Uri.parse(AppLinks.kChangelogUrl));
+        request.headers.set('User-Agent', 'FluxWave/1.0');
+        request.headers.set('Cache-Control', 'no-cache');
+        final response = await request.close();
+        if (response.statusCode != 200) return {};
+        final body = await response.transform(utf8.decoder).join();
+        return ChangelogParser.parse(body);
+      } finally {
+        client.close();
+      }
+    } catch (e, st) {
+      AppLog.warn('获取 CHANGELOG 失败', tag: 'update', error: e, stack: st);
+      return {};
+    }
   }
 
   /// 去掉版本号的 v/V 前缀。
@@ -233,6 +271,12 @@ class UpdateInfo {
   final String? publishedAt;
   final bool isPrerelease;
 
+  /// CHANGELOG.md 解析后的全部版本日志映射。
+  final Map<String, String> changelogEntries;
+
+  /// 跳过的版本日志列表（从新到旧），每个元素为 (版本号, 日志内容)。
+  final List<(String version, String content)> skippedChangelogs;
+
   const UpdateInfo({
     required this.currentVersion,
     required this.latestVersion,
@@ -241,10 +285,18 @@ class UpdateInfo {
     this.downloadUrl,
     this.publishedAt,
     this.isPrerelease = false,
+    this.changelogEntries = const {},
+    this.skippedChangelogs = const [],
   });
 
   /// 是否有可下载的 APK 资源。
   bool get hasDownload => downloadUrl != null && downloadUrl!.isNotEmpty;
+
+  /// 是否有来自 CHANGELOG.md 的更新日志。
+  bool get hasChangelog => skippedChangelogs.isNotEmpty;
+
+  /// 跳过的版本数量。
+  int get skippedVersionCount => skippedChangelogs.length;
 }
 
 /// GitHub Release API 响应的最小解析。

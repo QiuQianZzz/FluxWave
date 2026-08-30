@@ -298,6 +298,26 @@ class _UpdateDialogState extends State<UpdateDialog> {
                             fontWeight: FontWeight.w500,
                           ),
                         ),
+                        if (info.hasChangelog) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.primaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '跨 ${info.skippedVersionCount} 个版本',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: cs.onPrimaryContainer,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -310,35 +330,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: info.releaseNotes != null &&
-                                info.releaseNotes!.trim().isNotEmpty
-                            ? SingleChildScrollView(
-                                padding: const EdgeInsets.all(14),
-                                child: MarkdownBody(
-                                  data: info.releaseNotes!,
-                                  selectable: true,
-                                  styleSheet: _buildMarkdownStyle(theme, cs),
-                                  onTapLink: (text, href, title) {
-                                    if (href != null) {
-                                      launchUrl(Uri.parse(href));
-                                    }
-                                  },
-                                ),
-                              )
-                            : Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 24,
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '暂无更新日志',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: cs.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ),
+                        child: _buildChangelogContent(theme, cs),
                       ),
                     ),
                   ],
@@ -427,6 +419,102 @@ class _UpdateDialogState extends State<UpdateDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 构建更新日志内容：优先使用 CHANGELOG.md，回退到 GitHub Release Notes。
+  Widget _buildChangelogContent(ThemeData theme, ColorScheme cs) {
+    final info = widget.info;
+
+    // 有 CHANGELOG.md 解析的跨版本日志
+    if (info.hasChangelog) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(14),
+        shrinkWrap: true,
+        itemCount: info.skippedChangelogs.length,
+        itemBuilder: (context, index) {
+          final (version, content) = info.skippedChangelogs[index];
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: index < info.skippedChangelogs.length - 1 ? 16 : 0,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 版本标题
+                if (version != 'Unreleased') ...[
+                  Text(
+                    'v$version',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: cs.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ] else ...[
+                  Text(
+                    '最新变更',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: cs.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                // 日志内容（Markdown 渲染）
+                MarkdownBody(
+                  data: content,
+                  selectable: true,
+                  styleSheet: _buildMarkdownStyle(theme, cs),
+                  onTapLink: (text, href, title) {
+                    if (href != null) {
+                      launchUrl(Uri.parse(href));
+                    }
+                  },
+                ),
+                // 版本分隔线
+                if (index < info.skippedChangelogs.length - 1) ...[
+                  const SizedBox(height: 16),
+                  Divider(
+                    height: 1,
+                    color: cs.outlineVariant.withValues(alpha: 0.5),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    // 回退到 GitHub Release Notes
+    if (info.releaseNotes != null && info.releaseNotes!.trim().isNotEmpty) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(14),
+        child: MarkdownBody(
+          data: info.releaseNotes!,
+          selectable: true,
+          styleSheet: _buildMarkdownStyle(theme, cs),
+          onTapLink: (text, href, title) {
+            if (href != null) {
+              launchUrl(Uri.parse(href));
+            }
+          },
+        ),
+      );
+    }
+
+    // 无日志
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 24),
+      child: Center(
+        child: Text(
+          '暂无更新日志',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
+        ),
+      ),
     );
   }
 

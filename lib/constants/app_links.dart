@@ -34,6 +34,10 @@ class AppLinks {
   static String get kContributorsPageUrl =>
       '$kGitHubRepoUrl/graphs/contributors';
 
+  /// GitHub raw：CHANGELOG.md 内容（main 分支）。
+  static const kChangelogUrl =
+      'https://raw.githubusercontent.com/$githubOwner/$githubRepo/main/CHANGELOG.md';
+
   // ── 文档 ──
 
   /// 项目文档站。
