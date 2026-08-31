@@ -221,6 +221,9 @@ class PlayerProvider extends ChangeNotifier {
   /// 正在恢复上次会话：期间禁止任何落盘 & 禁止 positionStream 覆盖保存的进度。
   bool _restoring = false;
 
+  /// 迁移进行中：阻止定期保存覆盖正在补全的队列数据。
+  bool _migrating = false;
+
   /// 用户暂停意图：用户主动点击暂停/播放按钮、或明确指定了暂停状态（例
   /// 如恢复时 playing=false）时标记。`_startPlayback` 的 retry 循环每次迭
   /// 代前检查此标志，避免「用户手动 pause → retry 把它当作 native bug 又
@@ -768,10 +771,8 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> _persistNow() async {
     final storage = this.storage;
     if (storage == null) return;
-    // 恢复期间不落盘：磁盘上仍是上一份完好快照，跳过写入比用中间态覆盖更安全。
-    // 此守卫同步覆盖 debounce / guard flush / dispose 三条入口，避免恢复窗口内
-    // （_loadCurrent 含最长 15s 网络等待）被退后台/关窗的兜底写盘破坏恢复数据。
-    if (_restoring) return;
+    // 恢复/迁移期间不落盘：磁盘上仍是上一份完好快照，跳过写入比用中间态覆盖更安全。
+    if (_restoring || _migrating) return;
     final song = currentSong;
     if (_queueDirty) {
       try {
@@ -926,26 +927,35 @@ class PlayerProvider extends ChangeNotifier {
     final stored = storage.dataSchemaVersion;
     final target = PlayerPlaybackStorage.currentDataSchemaVersion;
     if (stored >= target) return;
-    AppLog.info(
-      '数据迁移：v$stored → v$target',
-      tag: 'player',
-    );
-    for (var v = stored; v < target; v++) {
-      try {
-        switch (v) {
-          case 0:
-            await _migrationV1ArtistIds(storage);
-          // 未来版本在此追加 case
-          // case 1: await _migrationV2Xxx(storage); break;
-          // case 2: await _migrationV3Yyy(storage); break;
+    AppLog.info('数据迁移：v$stored → v$target', tag: 'player');
+    _migrating = true;
+    try {
+      for (var v = stored; v < target; v++) {
+        try {
+          switch (v) {
+            case 0:
+              await _migrationV1ArtistIds(storage);
+            // 未来版本在此追加 case
+          }
+        } catch (e) {
+          AppLog.error('数据迁移 v${v + 1} 失败', tag: 'player', error: e);
         }
-      } catch (e) {
-        AppLog.error('数据迁移 v${v + 1} 失败', tag: 'player', error: e);
-        // 单步失败不阻断后续版本迁移
       }
+      await storage.setDataSchemaVersion(target);
+    } finally {
+      _migrating = false;
     }
-    await storage.setDataSchemaVersion(target);
-    AppLog.info('数据迁移完成：v$target', tag: 'player');
+    // 迁移可能修改了队列数据（如补全歌手 ID），需刷新内存队列。
+    try {
+      final snap = await storage.load();
+      if (snap != null && snap.queue.isNotEmpty) {
+        _queue = List.unmodifiable(snap.queue);
+        if (_currentIndex != null && _currentIndex! >= _queue.length) {
+          _currentIndex = _queue.length - 1;
+        }
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   /// 迁移 v0→v1：为旧队列中 artistId 缺失（id=0）的歌曲补全歌手 ID。
@@ -968,10 +978,6 @@ class PlayerProvider extends ChangeNotifier {
       }
     }
     if (needBackfill.isEmpty) return;
-    AppLog.info(
-      '迁移 v1：${needBackfill.length}/${queue.length} 首需补全歌手 ID',
-      tag: 'player',
-    );
     // 批量拉取（每批 500）
     final ids = needBackfill.map((i) => queue[i].id).toList();
     final fresh = await api.songDetailByIds(ids);
@@ -987,7 +993,6 @@ class PlayerProvider extends ChangeNotifier {
       }
     }
     if (replaced == 0) return;
-    AppLog.info('迁移 v1：成功补全 $replaced 首歌曲', tag: 'player');
     // 原子写回
     await storage.saveQueue(
       queue,
