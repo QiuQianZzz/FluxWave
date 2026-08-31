@@ -82,10 +82,18 @@ class UpdateService {
     }
   }
 
-  /// 检查是否已有指定版本的下载好的 APK 文件。
+  /// 生成 APK 文件名（含版本和架构）。
+  Future<String> _apkFileName(String version) async {
+    final v = _normalizeVersion(version);
+    final abi = await PlatformUtils.getAndroidAbi();
+    return 'fluxwave_${v}_$abi.apk';
+  }
+
+  /// 检查是否已有指定版本且架构匹配的下载好的 APK 文件。
   Future<bool> hasDownloadedApk(String version) async {
     final dir = await _getUpdateDir();
-    final file = File(p.join(dir, 'fluxwave_${_normalizeVersion(version)}.apk'));
+    final name = await _apkFileName(version);
+    final file = File(p.join(dir, name));
     if (!await file.exists()) return false;
     final size = await file.length();
     return size > 0;
@@ -122,7 +130,8 @@ class UpdateService {
   }) async {
     final dir = await _getUpdateDir();
     final v = version != null ? _normalizeVersion(version) : 'latest';
-    final filePath = p.join(dir, 'fluxwave_$v.apk');
+    final name = await _apkFileName(v);
+    final filePath = p.join(dir, name);
     final file = File(filePath);
 
     // 文件已存在且不强制重下：跳过下载，直接返回
