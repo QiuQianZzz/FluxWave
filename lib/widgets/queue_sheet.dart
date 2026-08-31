@@ -190,6 +190,7 @@ class _QueueSheetState extends State<QueueSheet> {
       cs.primaryContainer.withValues(alpha: 0.45),
       cs.surface,
     );
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     // 底色用 HSL 插值做隐式过渡：切歌换色时绕开 ARGB 线性插值的灰色中点。
     return TweenAnimationBuilder<Color>(
@@ -198,8 +199,8 @@ class _QueueSheetState extends State<QueueSheet> {
       builder: (context, color, child) =>
           ColoredBox(color: color, child: child),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Stack(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Stack(
           children: [
             Column(
               mainAxisSize: MainAxisSize.min,
@@ -288,8 +289,8 @@ class _QueueSheetState extends State<QueueSheet> {
                       shrinkWrap: true,
                       // 固定行高：滚动偏移精确计算（见 _scrollToCurrent 与 _QueueTile）。
                       itemExtent: _kQueueTileExtent,
-                      // 左右与行间距统一 8，底部留出悬浮按钮空间。
-                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 100),
+                      // 左右与行间距统一 8，底部留出悬浮按钮 + 导航栏空间。
+                      padding: EdgeInsets.fromLTRB(8, 8, 8, 100 + bottomPadding),
                       itemCount: queue.length,
                       itemBuilder: (context, index) {
                         final song = queue[index];
@@ -323,7 +324,7 @@ class _QueueSheetState extends State<QueueSheet> {
             if (queue.isNotEmpty)
               Positioned(
                 right: 16,
-                bottom: 16,
+                bottom: 16 + bottomPadding,
                 child: _QuickActionsFab(
                   canClear: queue.isNotEmpty,
                   shuffleMode: player.shuffleMode,

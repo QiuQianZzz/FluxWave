@@ -243,7 +243,7 @@ class _PredictiveBackSheetRoute<T> extends PopupRoute<T> {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
               ),
           clipBehavior: Clip.antiAlias,
-          child: SafeArea(top: false, child: builder(context)),
+          child: SafeArea(top: false, bottom: false, child: builder(context)),
         ),
       ),
     );
