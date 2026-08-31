@@ -13,6 +13,83 @@ class NeteaseApi {
 
   NeteaseSessionStorage? get storage => client.storage;
 
+  // ---------------------------------------------------------------------------
+  // 歌手相关接口
+  // ---------------------------------------------------------------------------
+
+  /// 歌手详情（api 模式；端点 `/api/artist/head/info/get`）。
+  ///
+  /// 返回 `{data: ArtistDetail}`，包含 cover/avatar/alias/briefDesc/musicSize/albumSize/followed。
+  Future<Map<String, dynamic>> artistDetail(int id) async {
+    final r = await client.request(
+      '/api/artist/head/info/get',
+      <String, Object>{'id': id},
+      NeteaseMode.api,
+    );
+    return (r is Map) ? Map<String, dynamic>.from(r) : {};
+  }
+
+  /// 歌手动态（api 模式；端点 `/api/artist/detail/dynamic`）。
+  ///
+  /// 返回粉丝数等动态信息。
+  Future<Map<String, dynamic>> artistDynamic(int id) async {
+    final r = await client.request(
+      '/api/artist/detail/dynamic',
+      <String, Object>{'id': id},
+      NeteaseMode.api,
+    );
+    return (r is Map) ? Map<String, dynamic>.from(r) : {};
+  }
+
+  /// 歌手歌曲列表（api 模式；端点 `/api/v1/artist/songs`）。
+  ///
+  /// [order]: `hot`（热度）/ `time`（发布时间）。
+  /// 返回 `{songs: [...], more: bool}`。
+  Future<Map<String, dynamic>> artistSongs(
+    int id, {
+    String order = 'hot',
+    int offset = 0,
+    int limit = 50,
+  }) async {
+    final r = await client.request(
+      '/api/v1/artist/songs',
+      <String, Object>{
+        'id': id,
+        'private_cloud': 'true',
+        'work_type': '1',
+        'order': order,
+        'offset': offset,
+        'limit': limit,
+      },
+      NeteaseMode.api,
+    );
+    return (r is Map) ? Map<String, dynamic>.from(r) : {};
+  }
+
+  /// 歌手专辑列表（api 模式；端点 `/api/artist/albums/{id}`）。
+  ///
+  /// 返回 `{hotAlbums: [...], more: bool}`。
+  Future<Map<String, dynamic>> artistAlbums(
+    int id, {
+    int offset = 0,
+    int limit = 30,
+  }) async {
+    final r = await client.request(
+      '/api/artist/albums/$id',
+      <String, Object>{
+        'limit': limit,
+        'offset': offset,
+        'total': 'true',
+      },
+      NeteaseMode.api,
+    );
+    return (r is Map) ? Map<String, dynamic>.from(r) : {};
+  }
+
+  // ---------------------------------------------------------------------------
+  // 推荐 / 每日
+  // ---------------------------------------------------------------------------
+
   /// 推荐歌单（weapi；端点 `/api/personalized/playlist`）。
   ///
   /// 无需登录即可调用；响应 `{code, result: [...]}`，result 项含
