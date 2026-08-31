@@ -108,10 +108,12 @@ class UpdateService {
       final dir = await _getUpdateDir();
       final dirObj = Directory(dir);
       if (!await dirObj.exists()) return;
-      await for (final entity in dirObj.list()) {
+      // 直接遍历并删除，不用 stream（避免大目录或文件锁导致挂起）
+      final files = dirObj.listSync();
+      for (final entity in files) {
         if (entity is File && entity.path.endsWith('.apk')) {
           try {
-            await entity.delete();
+            await entity.delete().timeout(const Duration(seconds: 5));
           } catch (_) {}
         }
       }

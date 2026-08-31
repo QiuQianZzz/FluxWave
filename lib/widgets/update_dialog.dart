@@ -30,6 +30,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
   double? _progress;
   bool _downloading = false;
   bool _verifying = false;
+  String? _status;
   String? _error;
   bool _apkExists = false;
 
@@ -54,13 +55,16 @@ class _UpdateDialogState extends State<UpdateDialog> {
       _downloading = true;
       _progress = _apkExists ? 1.0 : 0;
       _verifying = false;
+      _status = null;
       _error = null;
     });
 
     try {
       // 下载前清理旧版本 APK
       if (!_apkExists) {
+        if (mounted) setState(() => _status = '正在清理旧版本…');
         await UpdateService.instance.cleanOldApks();
+        if (mounted) setState(() => _status = null);
       }
 
       final filePath = await UpdateService.instance.downloadApk(
@@ -448,15 +452,25 @@ class _UpdateDialogState extends State<UpdateDialog> {
 
   Widget _buildDownloadProgress(ThemeData theme, ColorScheme cs) {
     final percent = _progress != null ? (_progress! * 100).toStringAsFixed(0) : '0';
+    final isIndeterminate = _progress == null;
+    final text = _status ?? (isIndeterminate
+        ? '正在下载 APK…'
+        : '正在下载 APK… $percent%');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(Icons.downloading_rounded, size: 16, color: cs.primary),
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: isIndeterminate
+                  ? CircularProgressIndicator(strokeWidth: 2, color: cs.primary)
+                  : Icon(Icons.downloading_rounded, size: 16, color: cs.primary),
+            ),
             const SizedBox(width: 6),
             Text(
-              '正在下载 APK… $percent%',
+              text,
               style: theme.textTheme.labelLarge?.copyWith(
                 color: cs.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
