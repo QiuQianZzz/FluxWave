@@ -86,6 +86,7 @@ class UpdateService {
   Future<String> _apkFileName(String version) async {
     final v = _normalizeVersion(version);
     final abi = await PlatformUtils.getAndroidAbi();
+    if (abi.isEmpty) return 'fluxwave_$v.apk';
     return 'fluxwave_${v}_$abi.apk';
   }
 
