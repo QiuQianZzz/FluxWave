@@ -164,6 +164,11 @@ class _MainScaffoldState extends State<MainScaffold> {
   /// 启动时检查更新：静默检查，有更新弹窗，无更新不提示。
   Future<void> _checkUpdate() async {
     try {
+      if (!mounted) return;
+      // 启动时清理残留的旧 APK 文件
+      await UpdateService.instance.cleanOldApks();
+
+      if (!mounted) return;
       final settings = context.read<SettingsProvider>();
       final info = await UpdateService.instance.check(
         includeBeta: settings.updateIncludeBeta,
