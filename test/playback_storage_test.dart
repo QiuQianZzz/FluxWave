@@ -349,7 +349,7 @@ void main() {
     expect(storage2.dataSchemaVersion, 2);
   });
 
-  test('currentDataSchemaVersion 常量 >= 2', () {
-    expect(PlayerPlaybackStorage.currentDataSchemaVersion, greaterThanOrEqualTo(2));
+  test('currentDataSchemaVersion 常量 >= 1', () {
+    expect(PlayerPlaybackStorage.currentDataSchemaVersion, greaterThanOrEqualTo(1));
   });
 }

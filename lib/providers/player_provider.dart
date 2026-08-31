@@ -917,9 +917,9 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   /// 增量数据迁移：读取 [PlayerPlaybackStorage.dataSchemaVersion]，
-  /// 按版本逐步执行缺失的迁移步骤，完成后递增版本号。
+  /// 从 stored 到 target-1 逐版本执行，完成后递增版本号。
   ///
-  /// 迁移在后台异步执行，不阻塞播放恢复；失败不影响正常使用。
+  /// 迁移在后台异步执行，不阻塞播放恢复；单步失败不影响后续版本。
   Future<void> _runMigrations() async {
     final storage = this.storage;
     if (storage == null || !netease.apiReady) return;
@@ -930,22 +930,30 @@ class PlayerProvider extends ChangeNotifier {
       '数据迁移：v$stored → v$target',
       tag: 'player',
     );
-    try {
-      if (stored < 2) await _migrationV2ArtistIds(storage);
-    } catch (e) {
-      AppLog.error('数据迁移失败', tag: 'player', error: e);
-      return;
+    for (var v = stored; v < target; v++) {
+      try {
+        switch (v) {
+          case 0:
+            await _migrationV1ArtistIds(storage);
+          // 未来版本在此追加 case
+          // case 1: await _migrationV2Xxx(storage); break;
+          // case 2: await _migrationV3Yyy(storage); break;
+        }
+      } catch (e) {
+        AppLog.error('数据迁移 v${v + 1} 失败', tag: 'player', error: e);
+        // 单步失败不阻断后续版本迁移
+      }
     }
     await storage.setDataSchemaVersion(target);
     AppLog.info('数据迁移完成：v$target', tag: 'player');
   }
 
-  /// 迁移 v2：为旧队列中 artistId 缺失（id=0）的歌曲补全歌手 ID。
+  /// 迁移 v0→v1：为旧队列中 artistId 缺失（id=0）的歌曲补全歌手 ID。
   ///
   /// 通过 `songDetailByIds` 批量拉取完整曲目信息（含 ar[].id），
   /// 替换后原子写回队列文件。仅处理 artist 全部 id=0 的歌曲，
   /// 已有有效 id 的歌曲不动。
-  Future<void> _migrationV2ArtistIds(PlayerPlaybackStorage storage) async {
+  Future<void> _migrationV1ArtistIds(PlayerPlaybackStorage storage) async {
     final api = netease.api;
     final snapshot = await storage.load();
     if (snapshot == null || snapshot.queue.isEmpty) return;
@@ -961,7 +969,7 @@ class PlayerProvider extends ChangeNotifier {
     }
     if (needBackfill.isEmpty) return;
     AppLog.info(
-      '迁移 v2：${needBackfill.length}/${queue.length} 首需补全歌手 ID',
+      '迁移 v1：${needBackfill.length}/${queue.length} 首需补全歌手 ID',
       tag: 'player',
     );
     // 批量拉取（每批 500）
@@ -979,7 +987,7 @@ class PlayerProvider extends ChangeNotifier {
       }
     }
     if (replaced == 0) return;
-    AppLog.info('迁移 v2：成功补全 $replaced 首歌曲', tag: 'player');
+    AppLog.info('迁移 v1：成功补全 $replaced 首歌曲', tag: 'player');
     // 原子写回
     await storage.saveQueue(
       queue,

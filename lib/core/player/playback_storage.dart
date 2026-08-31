@@ -124,7 +124,7 @@ class PlayerPlaybackStorage {
   /// 数据层 schema 版本（与队列文件格式版本解耦）。
   /// 每次数据迁移递增；启动时比对并执行缺失的迁移步骤。
   static const String _kDataSchemaKey = 'dataSchemaVersion';
-  static const int currentDataSchemaVersion = 2;
+  static const int currentDataSchemaVersion = 1;
 
   /// 当前队列文件名（不带版本号；格式版本由文件内 `v` 字段声明）。
   static const String _kQueueFileName = 'playback_queue.json';
