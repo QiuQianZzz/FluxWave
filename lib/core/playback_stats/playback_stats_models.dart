@@ -1,3 +1,4 @@
+import '../../models/artist.dart';
 import '../../models/song.dart';
 
 /// 最近播放条目（去重时间线：每首歌一行，最新播放在前）。
@@ -59,6 +60,7 @@ class RecentPlay {
               .split('/')
               .map((s) => s.trim())
               .where((s) => s.isNotEmpty)
+              .map((s) => ArtistSummary(id: 0, name: s))
               .toList(),
     albumName: album,
     coverUrl: coverUrl,
@@ -126,6 +128,7 @@ class LikedSong {
               .split('/')
               .map((s) => s.trim())
               .where((s) => s.isNotEmpty)
+              .map((s) => ArtistSummary(id: 0, name: s))
               .toList(),
     albumName: album,
     coverUrl: coverUrl,

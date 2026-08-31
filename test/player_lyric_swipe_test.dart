@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:fluxwave/pages/player_page.dart';
 import 'package:fluxwave/providers/liked_songs_provider.dart';
@@ -24,7 +25,7 @@ void main() {
   const song = Song(
     id: 1,
     name: '测试歌曲',
-    artists: ['测试歌手'],
+    artists: [ArtistSummary(id: 0, name: '测试歌手')],
     coverUrl: null,
     durationMs: 345000,
     fee: 0,

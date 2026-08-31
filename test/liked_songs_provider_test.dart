@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fluxwave/core/playback_stats/database_helper.dart';
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:fluxwave/providers/liked_songs_provider.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -33,7 +34,7 @@ void main() {
   Song song(int id) => Song(
     id: id,
     name: '歌$id',
-    artists: const ['甲'],
+    artists: const [ArtistSummary(id: 0, name: '甲')],
     coverUrl: null,
     durationMs: 200000,
     fee: 0,
@@ -73,13 +74,13 @@ void main() {
         source: 'netease',
         id: 9,
         name: 'A',
-        artists: const ['x'],
+        artists: const [ArtistSummary(id: 0, name: 'x')],
       );
       final b = Song(
         source: 'bilibili',
         id: 9,
         name: 'B',
-        artists: const ['y'],
+        artists: const [ArtistSummary(id: 0, name: 'y')],
       );
       await p.toggle(a);
       expect(p.isLiked(a), true);

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:fluxwave/core/playlist_detail_cache.dart';
 import 'package:fluxwave/models/playlist.dart';
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 
 Playlist _playlist(int id, String name) => Playlist(
@@ -14,8 +15,8 @@ Playlist _playlist(int id, String name) => Playlist(
 );
 
 List<Song> _tracks(int playlistId) => [
-  Song(id: playlistId * 10 + 1, name: '歌1', artists: ['A']),
-  Song(id: playlistId * 10 + 2, name: '歌2', artists: ['B']),
+  Song(id: playlistId * 10 + 1, name: '歌1', artists: [ArtistSummary(id: 0, name: 'A')]),
+  Song(id: playlistId * 10 + 2, name: '歌2', artists: [ArtistSummary(id: 0, name: 'B')]),
   Song(id: playlistId * 10 + 3, name: '歌3'),
 ];
 

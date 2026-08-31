@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'package:fluxwave/core/audio_service/app_audio_handler.dart';
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:fluxwave/widgets/cover_image.dart';
 
@@ -37,7 +38,7 @@ void main() {
   Song song(int id) => Song(
     id: id,
     name: '歌$id',
-    artists: const ['甲'],
+    artists: const [ArtistSummary(id: 0, name: '甲')],
     coverUrl: null,
     durationMs: 200000,
     fee: 0,

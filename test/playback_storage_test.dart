@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:fluxwave/core/player/playback_migration.dart';
 import 'package:fluxwave/core/player/playback_storage.dart';
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,7 +14,7 @@ void main() {
     id: id,
     name: 's$id',
     coverUrl: 'http://p1.music.126.net/$id.jpg',
-    artists: const ['artist'],
+    artists: const [ArtistSummary(id: 0, name: 'artist')],
     albumName: 'album',
     durationMs: 210000,
   );

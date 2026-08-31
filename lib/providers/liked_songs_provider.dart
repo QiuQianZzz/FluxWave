@@ -83,7 +83,7 @@ class LikedSongsProvider extends ChangeNotifier {
         source: song.source,
         sourceId: '${song.id}',
         name: song.name,
-        artist: song.artists.isEmpty ? null : song.artists.join(' / '),
+        artist: song.artists.isEmpty ? null : song.artistsLabel,
         album: song.albumName,
         coverUrl: song.coverUrl,
         durationMs: song.durationMs,

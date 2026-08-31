@@ -125,7 +125,7 @@ class AppAudioHandler extends BaseAudioHandler
     final item = MediaItem(
       id: '${song.source}_${song.id}',
       title: song.name,
-      artist: song.artists.isNotEmpty ? song.artists.join(' / ') : null,
+      artist: song.artists.isNotEmpty ? song.artistsLabel : null,
       album: song.albumName,
       duration: Duration(milliseconds: song.durationMs),
       artUri: artUri,

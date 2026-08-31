@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:fluxwave/pages/player_page.dart';
 import 'package:fluxwave/providers/liked_songs_provider.dart';
@@ -38,7 +39,7 @@ void main() {
   const song = Song(
     id: 1,
     name: '一首标题非常非常长需要被省略展示的示例歌曲名称测试贯穿省略',
-    artists: ['歌手甲', '歌手乙', '歌手丙'],
+    artists: [ArtistSummary(id: 0, name: '歌手甲'), ArtistSummary(id: 0, name: '歌手乙'), ArtistSummary(id: 0, name: '歌手丙')],
     coverUrl: 'https://example.com/cover.png',
     durationMs: 345000,
     fee: 0,

@@ -1,3 +1,5 @@
+import 'artist.dart';
+
 /// 歌曲音源的标识常量集。
 ///
 /// 每条 [Song] 都携带所属音源做命名空间：持久化的播放队列、音频缓存 key、
@@ -20,7 +22,7 @@ class Song {
 
   final int id;
   final String name;
-  final List<String> artists;
+  final List<ArtistSummary> artists;
   final int? albumId;
   final String? albumName;
   final String? coverUrl;
@@ -40,7 +42,7 @@ class Song {
   });
 
   /// 歌手展示（/ 分隔）。
-  String get artistsLabel => artists.join(' / ');
+  String get artistsLabel => artists.map((a) => a.name).join(' / ');
 
   /// 缩略封面 URL（CDN 按 `?param=100x100` 返回对应小图）。
   ///
@@ -83,12 +85,13 @@ class Song {
   /// （歌单详情与 song/detail 的曲目用 `dt` 表示毫秒时长）。
   factory Song.fromSearch(Map<String, dynamic> json) {
     final rawArtists = json['artists'] ?? json['ar'];
-    final artists = <String>[];
+    final artists = <ArtistSummary>[];
     if (rawArtists is List) {
       for (final a in rawArtists) {
         if (a is Map) {
-          final n = a['name']?.toString();
-          if (n != null && n.isNotEmpty) artists.add(n);
+          final id = a['id'] as int? ?? 0;
+          final name = a['name']?.toString() ?? '';
+          if (name.isNotEmpty) artists.add(ArtistSummary(id: id, name: name));
         }
       }
     }
@@ -118,7 +121,7 @@ class Song {
     'source': source,
     'id': id,
     'name': name,
-    'artists': artists,
+    'artists': artists.map((a) => a.toJson()).toList(growable: false),
     'albumId': albumId,
     'albumName': albumName,
     'coverUrl': coverUrl,
@@ -128,15 +131,30 @@ class Song {
 
   /// 从 [toJson] 产物恢复；字段缺失时用安全默认值（容错坏数据）。
   factory Song.fromJson(Map<String, dynamic> json) {
+    final rawArtists = json['artists'] as List?;
+    List<ArtistSummary> artists;
+    if (rawArtists != null && rawArtists.isNotEmpty) {
+      final first = rawArtists.first;
+      if (first is Map && first.containsKey('id')) {
+        // 新格式：List<{id, name}>
+        artists = rawArtists
+            .whereType<Map>()
+            .map((a) => ArtistSummary.fromJson(Map<String, dynamic>.from(a)))
+            .toList(growable: false);
+      } else {
+        // 旧格式：List<String>（向后兼容）
+        artists = rawArtists
+            .map((e) => ArtistSummary(id: 0, name: e.toString()))
+            .toList(growable: false);
+      }
+    } else {
+      artists = const [];
+    }
     return Song(
       source: json['source']?.toString() ?? SongSource.netease,
       id: (json['id'] as num?)?.toInt() ?? 0,
       name: json['name']?.toString() ?? '',
-      artists:
-          (json['artists'] as List?)
-              ?.map((e) => e.toString())
-              .toList(growable: false) ??
-          const [],
+      artists: artists,
       albumId: (json['albumId'] as num?)?.toInt(),
       albumName: json['albumName']?.toString(),
       coverUrl: json['coverUrl']?.toString(),

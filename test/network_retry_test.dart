@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:fluxwave/core/netease/netease_api.dart';
 import 'package:fluxwave/core/netease/netease_client.dart';
+import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:fluxwave/providers/liked_songs_provider.dart';
 import 'package:fluxwave/providers/netease_provider.dart';
@@ -28,7 +29,7 @@ void main() {
   Song song(int id) => Song(
     id: id,
     name: '歌$id',
-    artists: const ['甲'],
+    artists: const [ArtistSummary(id: 0, name: '甲')],
     coverUrl: null,
     durationMs: 200000,
     fee: 0,
