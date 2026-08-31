@@ -8,9 +8,12 @@ import 'package:provider/provider.dart';
 import '../core/color_readability.dart';
 import '../core/lyric/lyric_model.dart';
 import '../core/lyric/lyric_provider.dart';
+import '../core/navigation/app_nav.dart';
 import '../core/platform_utils.dart';
 import '../constants/nav_thresholds.dart';
+import '../models/artist.dart';
 import '../models/song.dart';
+import '../pages/artist/artist_detail_page.dart';
 import '../providers/netease_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/liked_songs_provider.dart';
@@ -112,6 +115,95 @@ class _PlayerPageState extends State<PlayerPage>
   void dispose() {
     _lyricsTransition.dispose();
     super.dispose();
+  }
+
+  /// 歌手点击：单歌手直接跳转，多歌手弹出选择器。
+  void _onArtistTap(Song song) {
+    final artists = song.artists;
+    if (artists.isEmpty) return;
+    if (artists.length == 1) {
+      if (artists.first.id > 0) {
+        AppNav.push(
+          context,
+          ArtistDetailPage(artistId: artists.first.id, artistName: artists.first.name),
+        );
+      }
+      return;
+    }
+    final valid = artists.where((a) => a.id > 0).toList();
+    if (valid.length == 1) {
+      AppNav.push(
+        context,
+        ArtistDetailPage(artistId: valid.first.id, artistName: valid.first.name),
+      );
+      return;
+    }
+    if (valid.length > 1) {
+      _showArtistPicker(valid);
+      return;
+    }
+    // 所有歌手 id 都为 0（旧格式持久化数据），仍然弹出列表供展示
+    _showArtistPicker(artists);
+  }
+
+  void _showArtistPicker(List<ArtistSummary> artists) {
+    final cs = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Text(
+                    '选择歌手',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ...artists.map(
+              (a) => ListTile(
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: cs.surfaceContainerHighest,
+                  child: Text(
+                    a.name.isNotEmpty ? a.name.characters.first : '?',
+                    style: TextStyle(color: cs.onSurfaceVariant),
+                  ),
+                ),
+                title: Text(
+                  a.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (a.id > 0) {
+                    AppNav.push(
+                      context,
+                      ArtistDetailPage(artistId: a.id, artistName: a.name),
+                    );
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -356,16 +448,19 @@ class _PlayerPageState extends State<PlayerPage>
                               ),
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              player.isTrial
-                                  ? '${song.artistsLabel} · 试听片段'
-                                  : song.artistsLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: player.isTrial
-                                    ? cs.error
-                                    : cs.onSurfaceVariant,
+                            GestureDetector(
+                              onTap: () => _onArtistTap(song),
+                              child: Text(
+                                player.isTrial
+                                    ? '${song.artistsLabel} · 试听片段'
+                                    : song.artistsLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: player.isTrial
+                                      ? cs.error
+                                      : cs.onSurfaceVariant,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 28),
@@ -552,17 +647,20 @@ class _PlayerPageState extends State<PlayerPage>
                     SizedBox(height: titleGap),
                     Align(
                       alignment: Alignment(alignX, 0),
-                      child: Text(
-                        player.isTrial
-                            ? '${song.artistsLabel} · 试听片段'
-                            : song.artistsLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: player.isTrial
-                              ? cs.error
-                              : cs.onSurfaceVariant,
-                          fontSize: artistFontSize,
+                      child: GestureDetector(
+                        onTap: () => _onArtistTap(song),
+                        child: Text(
+                          player.isTrial
+                              ? '${song.artistsLabel} · 试听片段'
+                              : song.artistsLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: player.isTrial
+                                ? cs.error
+                                : cs.onSurfaceVariant,
+                            fontSize: artistFontSize,
+                          ),
                         ),
                       ),
                     ),

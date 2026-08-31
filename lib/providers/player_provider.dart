@@ -872,6 +872,8 @@ class PlayerProvider extends ChangeNotifier {
       // 恢复完成：重置节流时间戳，避免恢复瞬间的瞬时进度立刻落盘覆盖正确值。
       _lastProgressSaveAt = DateTime.now().millisecondsSinceEpoch;
     }
+    // 队列就绪后异步执行数据迁移（不阻塞播放恢复）。
+    unawaited(_runMigrations());
   }
 
   /// 无注入快照时的异步恢复：文件读取 + 解析在后台 isolate 完成，
@@ -912,6 +914,78 @@ class PlayerProvider extends ChangeNotifier {
     } catch (e) {
       AppLog.error('恢复播放队列失败', tag: 'player', error: e);
     }
+  }
+
+  /// 增量数据迁移：读取 [PlayerPlaybackStorage.dataSchemaVersion]，
+  /// 按版本逐步执行缺失的迁移步骤，完成后递增版本号。
+  ///
+  /// 迁移在后台异步执行，不阻塞播放恢复；失败不影响正常使用。
+  Future<void> _runMigrations() async {
+    final storage = this.storage;
+    if (storage == null || !netease.apiReady) return;
+    final stored = storage.dataSchemaVersion;
+    final target = PlayerPlaybackStorage.currentDataSchemaVersion;
+    if (stored >= target) return;
+    AppLog.info(
+      '数据迁移：v$stored → v$target',
+      tag: 'player',
+    );
+    try {
+      if (stored < 2) await _migrationV2ArtistIds(storage);
+    } catch (e) {
+      AppLog.error('数据迁移失败', tag: 'player', error: e);
+      return;
+    }
+    await storage.setDataSchemaVersion(target);
+    AppLog.info('数据迁移完成：v$target', tag: 'player');
+  }
+
+  /// 迁移 v2：为旧队列中 artistId 缺失（id=0）的歌曲补全歌手 ID。
+  ///
+  /// 通过 `songDetailByIds` 批量拉取完整曲目信息（含 ar[].id），
+  /// 替换后原子写回队列文件。仅处理 artist 全部 id=0 的歌曲，
+  /// 已有有效 id 的歌曲不动。
+  Future<void> _migrationV2ArtistIds(PlayerPlaybackStorage storage) async {
+    final api = netease.api;
+    final snapshot = await storage.load();
+    if (snapshot == null || snapshot.queue.isEmpty) return;
+    final queue = List<Song>.from(snapshot.queue);
+    // 收集需要补全的歌曲下标（所有歌手 id 均为 0）
+    final needBackfill = <int>[];
+    for (var i = 0; i < queue.length; i++) {
+      final song = queue[i];
+      if (song.artists.isNotEmpty &&
+          song.artists.every((a) => a.id == 0)) {
+        needBackfill.add(i);
+      }
+    }
+    if (needBackfill.isEmpty) return;
+    AppLog.info(
+      '迁移 v2：${needBackfill.length}/${queue.length} 首需补全歌手 ID',
+      tag: 'player',
+    );
+    // 批量拉取（每批 500）
+    final ids = needBackfill.map((i) => queue[i].id).toList();
+    final fresh = await api.songDetailByIds(ids);
+    if (fresh.isEmpty) return;
+    // 按 id 建索引，替换原队列中的歌曲
+    final freshMap = {for (final s in fresh) s.id: s};
+    var replaced = 0;
+    for (final idx in needBackfill) {
+      final updated = freshMap[queue[idx].id];
+      if (updated != null) {
+        queue[idx] = updated;
+        replaced++;
+      }
+    }
+    if (replaced == 0) return;
+    AppLog.info('迁移 v2：成功补全 $replaced 首歌曲', tag: 'player');
+    // 原子写回
+    await storage.saveQueue(
+      queue,
+      snapshot.currentIndex,
+      shuffleOrder: snapshot.shuffleOrder,
+    );
   }
 
   Future<void> _onCompleted() async {

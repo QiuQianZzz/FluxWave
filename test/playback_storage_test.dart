@@ -334,4 +334,22 @@ void main() {
     expect(prefs.getString('playback_snapshot_v1'), isNull);
     expect(await storage.load(), isNull);
   });
+
+  test('dataSchemaVersion 默认为 0', () async {
+    final storage = await makeStorage();
+    expect(storage.dataSchemaVersion, 0);
+  });
+
+  test('setDataSchemaVersion 持久化后可读回', () async {
+    final storage = await makeStorage();
+    await storage.setDataSchemaVersion(2);
+    expect(storage.dataSchemaVersion, 2);
+    // 新实例也能读到
+    final storage2 = await makeStorage();
+    expect(storage2.dataSchemaVersion, 2);
+  });
+
+  test('currentDataSchemaVersion 常量 >= 2', () {
+    expect(PlayerPlaybackStorage.currentDataSchemaVersion, greaterThanOrEqualTo(2));
+  });
 }
