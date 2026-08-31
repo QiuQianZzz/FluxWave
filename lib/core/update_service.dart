@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../constants/app_links.dart';
 import 'changelog_parser.dart';
 import 'logging/app_log.dart';
+import 'platform_utils.dart';
 
 /// GitHub Release 更新检测服务。
 ///
@@ -66,7 +67,7 @@ class UpdateService {
           latestVersion: _stripVersionPrefix(release.tagName),
           releaseNotes: release.body,
           releaseUrl: release.htmlUrl,
-          downloadUrl: release.downloadUrl,
+          downloadUrl: await release.downloadUrl,
           sha256Url: release.sha256Url,
           publishedAt: release.publishedAt,
           isPrerelease: release.isPrerelease,
@@ -387,7 +388,7 @@ class _GitHubRelease {
   final String htmlUrl;
   final String? publishedAt;
   final bool isPrerelease;
-  final String? downloadUrl;
+  final List<Map<String, dynamic>>? apkAssets;
   final String? sha256Url;
 
   const _GitHubRelease({
@@ -396,13 +397,13 @@ class _GitHubRelease {
     required this.htmlUrl,
     this.publishedAt,
     this.isPrerelease = false,
-    this.downloadUrl,
+    this.apkAssets,
     this.sha256Url,
   });
 
   factory _GitHubRelease.fromJson(Map<String, dynamic> json) {
     // 从 assets 中查找 APK 和 SHA256 校验文件的下载链接
-    String? apkUrl;
+    final apkAssets = <Map<String, dynamic>>[];
     String? sha256Url;
     final assets = json['assets'] as List?;
     if (assets != null) {
@@ -410,7 +411,7 @@ class _GitHubRelease {
         final name = asset['name'] as String? ?? '';
         final lowerName = name.toLowerCase();
         if (lowerName.endsWith('.apk')) {
-          apkUrl = asset['browser_download_url'] as String?;
+          apkAssets.add(asset);
         } else if (lowerName.endsWith('.sha256')) {
           sha256Url = asset['browser_download_url'] as String?;
         }
@@ -423,8 +424,58 @@ class _GitHubRelease {
       htmlUrl: json['html_url'] as String? ?? '',
       publishedAt: json['published_at'] as String?,
       isPrerelease: json['prerelease'] as bool? ?? false,
-      downloadUrl: apkUrl,
+      apkAssets: apkAssets,
       sha256Url: sha256Url,
     );
+  }
+
+  /// 根据设备架构选择最匹配的 APK 下载链接。
+  Future<String?> get downloadUrl async {
+    if (apkAssets == null || apkAssets!.isEmpty) return null;
+    return _selectApkByAbi(apkAssets!);
+  }
+
+  /// 根据设备架构从 APK assets 中选择最匹配的下载链接。
+  ///
+  /// 优先级：精确架构匹配 > universal > null（调用方回退到 GitHub 页面）。
+  static Future<String?> _selectApkByAbi(
+    List<Map<String, dynamic>> apkAssets,
+  ) async {
+    if (apkAssets.isEmpty) return null;
+    if (apkAssets.length == 1) {
+      return apkAssets.first['browser_download_url'] as String?;
+    }
+
+    final abi = await PlatformUtils.getAndroidAbi();
+
+    // 架构关键词映射：abi 标识 -> 文件名中可能出现的关键词
+    final abiKeywords = <String, List<String>>{
+      'arm64-v8a': ['arm64', 'aarch64'],
+      'armeabi-v7a': ['armv7', 'armeabi-v7a', 'armeabi'],
+      'x86_64': ['x86_64', 'x64'],
+      'x86': ['x86', 'i686', 'i386'],
+    };
+
+    // 1. 尝试精确匹配
+    final keywords = abiKeywords[abi] ?? [];
+    for (final asset in apkAssets) {
+      final name = (asset['name'] as String? ?? '').toLowerCase();
+      for (final keyword in keywords) {
+        if (name.contains(keyword)) {
+          return asset['browser_download_url'] as String?;
+        }
+      }
+    }
+
+    // 2. 尝试 universal / fat APK
+    for (final asset in apkAssets) {
+      final name = (asset['name'] as String? ?? '').toLowerCase();
+      if (name.contains('universal') || name.contains('fat') || name.contains('all')) {
+        return asset['browser_download_url'] as String?;
+      }
+    }
+
+    // 3. 无匹配，返回 null，调用方回退到 GitHub Release 页面
+    return null;
   }
 }

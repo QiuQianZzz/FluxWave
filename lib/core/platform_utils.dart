@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 /// 平台判断工具类：统一管理所有平台相关的布尔判断。
@@ -31,4 +33,29 @@ class PlatformUtils {
   /// 当前是否 Linux。
   static bool get isLinux =>
       defaultTargetPlatform == TargetPlatform.linux;
+
+  /// 获取当前 Android 设备的 ABI。
+  ///
+  /// 通过读取 `/proc/self/maps` 的前几行判断 CPU 架构。
+  /// 返回如 `arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`。
+  /// 非 Android 或无法判断时返回 `arm64-v8a`（主流默认值）。
+  static Future<String> getAndroidAbi() async {
+    if (!isAndroid) return '';
+    try {
+      final result = await Process.run('getprop', ['ro.product.cpu.abi']);
+      final abi = (result.stdout as String).trim();
+      if (abi.isNotEmpty) return abi;
+    } catch (_) {}
+    try {
+      final maps = await File('/proc/self/maps').readAsLines();
+      if (maps.isNotEmpty) {
+        final firstLine = maps.first;
+        if (firstLine.contains('/arm64')) return 'arm64-v8a';
+        if (firstLine.contains('/arm')) return 'armeabi-v7a';
+        if (firstLine.contains('/x86_64')) return 'x86_64';
+        if (firstLine.contains('/x86')) return 'x86';
+      }
+    } catch (_) {}
+    return 'arm64-v8a';
+  }
 }
