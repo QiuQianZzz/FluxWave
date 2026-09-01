@@ -29,6 +29,7 @@ class PredictiveBackGesture extends StatefulWidget {
     this.scaleTo = 0.85,
     this.alignment = Alignment.bottomCenter,
     this.enabled = true,
+    this.onDismiss,
   }) : assert(scaleTo > 0 && scaleTo <= 1, 'scaleTo 必须为 (0, 1] 内的比例');
 
   /// 当前是否有 [showPredictiveBackSheet] 弹层活跃。
@@ -49,6 +50,9 @@ class PredictiveBackGesture extends StatefulWidget {
   /// 不认领系统 back 手势，退回普通返回。
   final bool enabled;
 
+  /// 拖拽关闭回调。非 null 时启用向下拖拽关闭手势。
+  final VoidCallback? onDismiss;
+
   @override
   State<PredictiveBackGesture> createState() => _PredictiveBackGestureState();
 }
@@ -67,6 +71,10 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
   /// 避免用户觉得停顿。
   static const Duration _shrinkFillDuration = Duration(milliseconds: 80);
   static const Curve _shrinkFillCurve = Curves.easeOutCubic;
+
+  // ── 拖拽关闭 ──
+  final _dragNotifier = ValueNotifier<double>(0);
+  bool _dismissing = false;
 
   /// 手势可被认领的条件：本弹层是最上层路由。
   /// 注意：不检查 [ModalRoute.popGestureEnabled]，因为手势认领通过
@@ -92,6 +100,8 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _shrink.dispose();
+    _dragNotifier.dispose();
+    _dismissing = false;
     super.dispose();
   }
 
@@ -131,11 +141,10 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+    final child = AnimatedBuilder(
       animation: _shrink,
       builder: (context, child) {
         final p = _shrink.value;
-        // 等比缩放：scaleX == scaleY，收缩前后宽高比例一致，内容不变形。
         final s = 1.0 - (1.0 - widget.scaleTo) * p;
         return Transform.scale(
           scale: s,
@@ -144,6 +153,46 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
         );
       },
       child: widget.child,
+    );
+
+    if (widget.onDismiss == null) return child;
+
+    return GestureDetector(
+      onVerticalDragStart: (_) {
+        if (_shrink.isAnimating || _dismissing) return;
+        _dragNotifier.value = 0;
+      },
+      onVerticalDragUpdate: (details) {
+        if (_dismissing) return;
+        if (details.primaryDelta != null && details.primaryDelta! > 0) {
+          _dragNotifier.value += details.primaryDelta!;
+        }
+      },
+      onVerticalDragEnd: (details) {
+        if (_dismissing) return;
+        final v = details.primaryVelocity ?? 0;
+        if (_dragNotifier.value > 80 || v > 800) {
+          _dismissing = true;
+          widget.onDismiss?.call();
+          // 保持当前偏移，pop 动画完成后由 route 移除 widget 树自动清理。
+          return;
+        }
+        _dragNotifier.value = 0;
+      },
+      onVerticalDragCancel: () {
+        if (_dismissing) return;
+        _dragNotifier.value = 0;
+      },
+      child: ValueListenableBuilder<double>(
+        valueListenable: _dragNotifier,
+        builder: (context, offset, child) {
+          return Transform.translate(
+            offset: Offset(0, offset),
+            child: child,
+          );
+        },
+        child: child,
+      ),
     );
   }
 }
@@ -230,22 +279,51 @@ class _PredictiveBackSheetRoute<T> extends PopupRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: PredictiveBackGesture(
-        scaleTo: scaleTo,
-        enabled: enabled,
-        child: Material(
-          color: backgroundColor ?? Theme.of(context).colorScheme.surface,
-          shape:
-              shape ??
-              const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    // Stack + Positioned 让内容自适应高度（对齐 showModalBottomSheet 的行为）。
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).pop(),
+            child: FadeTransition(
+              opacity: CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOut,
               ),
-          clipBehavior: Clip.antiAlias,
-          child: SafeArea(top: false, bottom: false, child: builder(context)),
+              child: ColoredBox(
+                color: _barrierColor,
+              ),
+            ),
+          ),
         ),
-      ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: PredictiveBackGesture(
+            scaleTo: scaleTo,
+            enabled: enabled,
+            onDismiss: () {
+              final route = ModalRoute.of(context);
+              if (route?.isCurrent == true) {
+                Navigator.of(context).pop();
+              }
+            },
+            child: Material(
+              color: backgroundColor ?? Theme.of(context).colorScheme.surface,
+              shape:
+                  shape ??
+                  const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(16),
+                    ),
+                  ),
+              clipBehavior: Clip.antiAlias,
+              child: builder(context),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

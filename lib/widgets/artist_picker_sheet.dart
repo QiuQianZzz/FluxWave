@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/artist.dart';
+import 'predictive_back_gesture.dart';
 
 /// 歌手选择底部抽屉。
 ///
@@ -15,8 +16,8 @@ class ArtistPickerSheet extends StatelessWidget {
     BuildContext context, {
     required List<ArtistSummary> artists,
   }) {
-    return showModalBottomSheet<ArtistSummary>(
-      context: context,
+    return showPredictiveBackSheet<ArtistSummary>(
+      context,
       builder: (_) => ArtistPickerSheet(artists: artists),
     );
   }
@@ -62,62 +63,70 @@ class ArtistPickerSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          // ── 歌手列表 ──
-          ...artists.map(
-            (a) => InkWell(
-              onTap: () => Navigator.of(context).pop(a),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            cs.primaryContainer,
-                            cs.primaryContainer.withValues(alpha: 0.6),
-                          ],
-                        ),
+          // ── 歌手列表（可滚动） ──
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: artists.map(
+                  (a) => InkWell(
+                    onTap: () => Navigator.of(context).pop(a),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
                       ),
-                      child: Center(
-                        child: Text(
-                          a.name.isNotEmpty ? a.name.characters.first : '?',
-                          style: TextStyle(
-                            color: cs.onPrimaryContainer,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  cs.primaryContainer,
+                                  cs.primaryContainer.withValues(alpha: 0.6),
+                                ],
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                a.name.isNotEmpty
+                                    ? a.name.characters.first
+                                    : '?',
+                                style: TextStyle(
+                                  color: cs.onPrimaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              a.name,
+                              style: Theme.of(context).textTheme.bodyLarge,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: cs.outline,
+                            size: 20,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        a.name,
-                        style: Theme.of(context).textTheme.bodyLarge,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: cs.outline,
-                      size: 20,
-                    ),
-                  ],
-                ),
+                  ),
+                ).toList(),
               ),
             ),
           ),
-          const SizedBox(height: 8),
         ],
       ),
     );

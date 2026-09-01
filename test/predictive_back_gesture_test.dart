@@ -28,17 +28,19 @@ void main() {
     'swipeEdge': 0,
   };
 
-  /// 面板当前 X 轴缩放（只查 [PredictiveBackGesture] 子树，避免命中路由转场的
-  /// 其它 Transform）。注意不能用 Transform.getMaxScaleOnAxis()——
-  /// Transform.scale 的矩阵是 diagonal3Values(s, s, 1)，z=1 时该函数恒返回 1.0。
+  /// 面板当前 X 轴缩放（只查 [PredictiveBackGesture] 子树中的 Transform.scale，
+  /// 跳过拖拽关闭用的 Transform.translate）。
   double sheetScaleX(WidgetTester tester) {
-    final t = tester.widget<Transform>(
-      find
-          .descendant(
-            of: find.byType(PredictiveBackGesture),
-            matching: find.byType(Transform),
-          )
-          .first,
+    final transforms = tester.widgetList<Transform>(
+      find.descendant(
+        of: find.byType(PredictiveBackGesture),
+        matching: find.byType(Transform),
+      ),
+    );
+    // Transform.translate 的 x 轴缩放恒为 1.0；Transform.scale 才是真正的缩放值。
+    final t = transforms.firstWhere(
+      (t) => t.transform.entry(0, 0) != 1.0,
+      orElse: () => transforms.first,
     );
     return t.transform.entry(0, 0);
   }
