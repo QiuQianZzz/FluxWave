@@ -6,8 +6,10 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
 
 import '../constants/nav_thresholds.dart';
+import '../core/navigation/artist_navigation.dart';
 import '../core/platform_utils.dart';
 import '../core/update_service.dart';
+import '../pages/artist/artist_detail_page.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/app_toast.dart';
@@ -103,6 +105,8 @@ class _MainScaffoldState extends State<MainScaffold> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // 设置静态回调（仅一次）
+    ArtistNavigation.onNavigateToArtist ??= _navigateToArtistFromPlayer;
     final player = context.read<PlayerProvider>();
     if (_playerRef != player) {
       _playerRef?.removeListener(_onPlayerChanged);
@@ -272,6 +276,16 @@ class _MainScaffoldState extends State<MainScaffold> {
       HapticFeedback.selectionClick();
     }
     setState(() => _currentIndex = index);
+  }
+
+  /// 从播放页跳转歌手页：pop 播放页（根 Navigator）→ push 歌手页到当前 tab Navigator。
+  void _navigateToArtistFromPlayer(int id, String name) {
+    Navigator.of(context).pop();
+    _tabNavKeys[_currentIndex].currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => ArtistDetailPage(artistId: id, artistName: name),
+      ),
+    );
   }
 
   @override

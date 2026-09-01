@@ -6,14 +6,13 @@ import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:provider/provider.dart';
 
 import '../core/color_readability.dart';
+import '../core/navigation/artist_navigation.dart';
 import '../core/lyric/lyric_model.dart';
 import '../core/lyric/lyric_provider.dart';
-import '../core/navigation/app_nav.dart';
 import '../core/platform_utils.dart';
 import '../constants/nav_thresholds.dart';
 import '../models/artist.dart';
 import '../models/song.dart';
-import '../pages/artist/artist_detail_page.dart';
 import '../providers/netease_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/liked_songs_provider.dart';
@@ -118,32 +117,33 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 歌手点击：单歌手直接跳转，多歌手弹出选择器。
+  ///
+  /// 跳转前先关闭播放页（pop），再在 tab 导航器上 push 歌手页，
+  /// 使 tab 栏与迷你播放器可见。
   void _onArtistTap(Song song) {
     final artists = song.artists;
     if (artists.isEmpty) return;
     if (artists.length == 1) {
       if (artists.first.id > 0) {
-        AppNav.push(
-          context,
-          ArtistDetailPage(artistId: artists.first.id, artistName: artists.first.name),
-        );
+        _navigateToArtist(artists.first.id, artists.first.name);
       }
       return;
     }
     final valid = artists.where((a) => a.id > 0).toList();
     if (valid.length == 1) {
-      AppNav.push(
-        context,
-        ArtistDetailPage(artistId: valid.first.id, artistName: valid.first.name),
-      );
+      _navigateToArtist(valid.first.id, valid.first.name);
       return;
     }
     if (valid.length > 1) {
       _showArtistPicker(valid);
       return;
     }
-    // 所有歌手 id 都为 0（旧格式持久化数据），仍然弹出列表供展示
     _showArtistPicker(artists);
+  }
+
+  /// 关闭播放页 → push 歌手页到当前 tab Navigator。
+  void _navigateToArtist(int id, String name) {
+    ArtistNavigation.onNavigateToArtist?.call(id, name);
   }
 
   void _showArtistPicker(List<ArtistSummary> artists) {
@@ -189,12 +189,9 @@ class _PlayerPageState extends State<PlayerPage>
                   overflow: TextOverflow.ellipsis,
                 ),
                 onTap: () {
-                  Navigator.of(ctx).pop();
+                  Navigator.of(ctx).pop(); // 关闭底部弹窗
                   if (a.id > 0) {
-                    AppNav.push(
-                      context,
-                      ArtistDetailPage(artistId: a.id, artistName: a.name),
-                    );
+                    _navigateToArtist(a.id, a.name);
                   }
                 },
               ),

@@ -43,6 +43,12 @@ class ArtistDetail {
 
   String? get avatarSmall => _thumbnail(avatarUrl);
 
+  /// 原图（不缩略），用于歌手页背景大图。
+  String? get coverFull => coverUrl;
+
+  /// 原图（不缩略），用于歌手页头像。
+  String? get avatarFull => avatarUrl;
+
   static String? _thumbnail(String? url, {int size = 100}) {
     if (url == null || url.isEmpty) return null;
     const marker = 'param=';

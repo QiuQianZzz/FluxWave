@@ -34,6 +34,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
   late final TabController _tabCtrl;
   late final ArtistProvider _provider;
 
+  /// 歌手名是否已滚出可视区域（用于 SliverAppBar 标题显隐）。
+  bool _nameScrolledOff = false;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +69,18 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     context.read<PlayerProvider>().addToQueue(song);
   }
 
+  /// 滚动监听：检测歌手名是否已滚出顶部。
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollUpdateNotification && notification.depth == 0) {
+      // 歌手名区域高度约 100px（头像68 + padding），超过此距离即视为已滚出。
+      final off = notification.metrics.pixels > 100;
+      if (off != _nameScrolledOff) {
+        setState(() => _nameScrolledOff = off);
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider.value(
@@ -79,7 +94,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
             if (state.error != null && state.detail == null) {
               return _buildError(state);
             }
-            return _buildContent(state);
+            return _buildBody(state);
           },
         ),
       ),
@@ -113,131 +128,112 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     );
   }
 
-  Widget _buildContent(ArtistProvider state) {
+  Widget _buildBody(ArtistProvider state) {
     final detail = state.detail;
-    return CustomScrollView(
-      slivers: [
-        _ArtistSliverAppBar(
-          detail: detail,
-          artistName: widget.artistName,
-        ),
-        SliverToBoxAdapter(
-          child: _ArtistHeader(detail: detail, followerCount: state.followerCount),
-        ),
-        SliverToBoxAdapter(
-          child: _ArtistTabs(
-            tabCtrl: _tabCtrl,
-            songsCount: state.songs.length,
-            albumsCount: state.albums.length,
+    final displayName = detail?.name ?? widget.artistName ?? '';
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: CustomScrollView(
+        slivers: [
+          _ArtistAppBar(
+            title: displayName,
+            showTitle: _nameScrolledOff,
           ),
-        ),
-        SliverToBoxAdapter(child: const SizedBox(height: 4)),
-        if (_tabCtrl.index == 0) ...[
-          if (state.songs.isEmpty && !state.loading)
-            const SliverToBoxAdapter(child: _EmptyHint(text: '暂无歌曲'))
-          else
-            SliverFixedExtentList(
-              itemExtent: SongTile.kTileExtent,
-              delegate: SliverChildBuilderDelegate(
-                (context, i) => SongTile(
-                  song: state.songs[i],
-                  index: i,
-                  onTap: () => _playAt(state.songs, i),
-                  onPlayNext: () => _playNext(state.songs[i]),
-                  onAddToQueue: () => _addToQueue(state.songs[i]),
-                ),
-                childCount: state.songs.length,
-              ),
+          SliverToBoxAdapter(
+            child: _ArtistHeroCard(
+              detail: detail,
+              artistName: widget.artistName,
+              followerCount: state.followerCount,
             ),
-          if (state.songsHasMore)
-            SliverToBoxAdapter(
-              child: _LoadMoreButton(
-                loading: state.songsLoadingMore,
-                onTap: () => state.loadMoreSongs(_api),
-              ),
+          ),
+          SliverToBoxAdapter(
+            child: _ArtistTabs(
+              tabCtrl: _tabCtrl,
+              songsCount: state.songs.length,
+              albumsCount: state.albums.length,
             ),
-        ] else ...[
-          if (state.albums.isEmpty && !state.loading)
-            const SliverToBoxAdapter(child: _EmptyHint(text: '暂无专辑'))
-          else
-            SliverList.builder(
-              itemCount: state.albums.length,
-              itemBuilder: (context, i) => _AlbumTile(album: state.albums[i]),
-            ),
-          if (state.albumsHasMore)
-            SliverToBoxAdapter(
-              child: _LoadMoreButton(
-                loading: state.albumsLoadingMore,
-                onTap: () => state.loadMoreAlbums(_api),
-              ),
-            ),
-        ],
-        const SliverToBoxAdapter(child: SizedBox(height: 80)),
-      ],
-    );
-  }
-}
-
-// =============================================================================
-// SliverAppBar：背景大图 + 渐变 + 返回按钮
-// =============================================================================
-
-class _ArtistSliverAppBar extends StatelessWidget {
-  final ArtistDetail? detail;
-  final String? artistName;
-
-  const _ArtistSliverAppBar({required this.detail, this.artistName});
-
-  @override
-  Widget build(BuildContext context) {
-    final coverUrl = detail?.coverSmall ?? detail?.avatarSmall;
-    final name = detail?.name ?? artistName ?? '';
-
-    return SliverAppBar(
-      expandedHeight: 260,
-      pinned: true,
-      stretch: true,
-      title: Text(
-        name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      flexibleSpace: FlexibleSpaceBar(
-        background: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (coverUrl != null)
-              CoverImage(url: coverUrl, fit: BoxFit.cover)
+          ),
+          SliverToBoxAdapter(child: const SizedBox(height: 4)),
+          if (_tabCtrl.index == 0) ...[
+            if (state.songs.isEmpty && !state.loading)
+              const SliverToBoxAdapter(child: _EmptyHint(text: '暂无歌曲'))
             else
-              Container(color: Theme.of(context).colorScheme.surfaceContainerHighest),
-            // 渐变遮罩
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black54],
+              SliverFixedExtentList(
+                itemExtent: SongTile.kTileExtent,
+                delegate: SliverChildBuilderDelegate(
+                  (context, i) => SongTile(
+                    song: state.songs[i],
+                    index: i,
+                    onTap: () => _playAt(state.songs, i),
+                    onPlayNext: () => _playNext(state.songs[i]),
+                    onAddToQueue: () => _addToQueue(state.songs[i]),
+                  ),
+                  childCount: state.songs.length,
                 ),
               ),
-            ),
-            // 底部歌手名
-            if (detail != null)
-              Positioned(
-                left: 20,
-                right: 20,
-                bottom: 16,
-                child: Text(
-                  name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+            if (state.songsHasMore)
+              SliverToBoxAdapter(
+                child: _LoadMoreButton(
+                  loading: state.songsLoadingMore,
+                  onTap: () => state.loadMoreSongs(_api),
+                ),
+              ),
+          ] else ...[
+            if (state.albums.isEmpty && !state.loading)
+              const SliverToBoxAdapter(child: _EmptyHint(text: '暂无专辑'))
+            else
+              SliverList.builder(
+                itemCount: state.albums.length,
+                itemBuilder: (context, i) => _AlbumTile(album: state.albums[i]),
+              ),
+            if (state.albumsHasMore)
+              SliverToBoxAdapter(
+                child: _LoadMoreButton(
+                  loading: state.albumsLoadingMore,
+                  onTap: () => state.loadMoreAlbums(_api),
                 ),
               ),
           ],
+          const SliverToBoxAdapter(child: SizedBox(height: 80)),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// SliverAppBar：常驻返回按钮 + 条件显示歌手名
+// =============================================================================
+
+class _ArtistAppBar extends StatelessWidget {
+  final String title;
+  final bool showTitle;
+
+  const _ArtistAppBar({
+    required this.title,
+    required this.showTitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SliverAppBar(
+      pinned: true,
+      // 透明背景，滚动后变为 surface 色
+      backgroundColor: cs.surface,
+      surfaceTintColor: Colors.transparent,
+      leading: IconButton(
+        onPressed: () => Navigator.of(context).pop(),
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
+      title: AnimatedOpacity(
+        opacity: showTitle ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 200),
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
     );
@@ -245,98 +241,148 @@ class _ArtistSliverAppBar extends StatelessWidget {
 }
 
 // =============================================================================
-// 歌手信息头部：头像 + 别名 + 统计 + 简介
+// Hero Card：背景大图 + 渐变 + 头像 + 名字 + 统计 + 简介
 // =============================================================================
 
-class _ArtistHeader extends StatelessWidget {
+class _ArtistHeroCard extends StatelessWidget {
   final ArtistDetail? detail;
+  final String? artistName;
   final int followerCount;
 
-  const _ArtistHeader({required this.detail, required this.followerCount});
+  const _ArtistHeroCard({
+    required this.detail,
+    this.artistName,
+    required this.followerCount,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final d = detail;
-    if (d == null) return const SizedBox.shrink();
+    final name = d?.name ?? artistName ?? '';
+    final coverUrl = d?.coverFull ?? d?.avatarFull;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 头像 + 名字 + 别名
-          Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ── 背景大图区域 ──
+        SizedBox(
+          height: 280,
+          width: double.infinity,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              _Avatar(url: d.avatarSmall ?? d.coverSmall),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      d.name,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (d.alias.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        d.alias,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: cs.onSurfaceVariant,
+              // 背景图（原图分辨率）
+              if (coverUrl != null)
+                CoverImage(url: coverUrl, fit: BoxFit.cover)
+              else
+                Container(color: cs.surfaceContainerHighest),
+              // 渐变遮罩
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.transparent,
+                      Colors.black26,
+                      Colors.black87,
+                    ],
+                    stops: [0.0, 0.35, 0.7, 1.0],
+                  ),
+                ),
+              ),
+              // 底部：头像 + 名字 + 别名
+              if (d != null)
+                Positioned(
+                  left: 20,
+                  right: 20,
+                  bottom: 20,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _Avatar(url: d.avatarFull ?? d.coverFull),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                height: 1.2,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (d.alias.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                d.alias,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.8),
+                                  fontSize: 13,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ],
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        // ── 信息区域 ──
+        if (d != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    _StatChip(
+                      icon: Icons.music_note_rounded,
+                      label: '${d.musicSize} 首歌',
+                    ),
+                    _StatChip(
+                      icon: Icons.album_rounded,
+                      label: '${d.albumSize} 张专辑',
+                    ),
+                    if (followerCount > 0)
+                      _StatChip(
+                        icon: Icons.people_rounded,
+                        label: '$followerCount 粉丝',
+                      ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // 统计 chips
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              _StatChip(
-                icon: Icons.music_note_rounded,
-                label: '${d.musicSize} 首歌',
-              ),
-              _StatChip(
-                icon: Icons.album_rounded,
-                label: '${d.albumSize} 张专辑',
-              ),
-              if (followerCount > 0)
-                _StatChip(
-                  icon: Icons.people_rounded,
-                  label: '$followerCount 粉丝',
-                ),
-            ],
-          ),
-          // 简介
-          if (d.briefDesc.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              d.briefDesc,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
+                if (d.briefDesc.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _ExpandableText(text: d.briefDesc),
+                ],
+              ],
             ),
-          ],
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
+
+// =============================================================================
+// 圆形头像
+// =============================================================================
 
 class _Avatar extends StatelessWidget {
   final String? url;
@@ -346,11 +392,18 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
-      width: 64,
-      height: 64,
+      width: 68,
+      height: 68,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: cs.surfaceContainerHighest,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: url != null
@@ -359,6 +412,10 @@ class _Avatar extends StatelessWidget {
     );
   }
 }
+
+// =============================================================================
+// 统计 Chip
+// =============================================================================
 
 class _StatChip extends StatelessWidget {
   final IconData icon;
@@ -387,6 +444,52 @@ class _StatChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// =============================================================================
+// 可展开文本
+// =============================================================================
+
+class _ExpandableText extends StatefulWidget {
+  final String text;
+  const _ExpandableText({required this.text});
+
+  @override
+  State<_ExpandableText> createState() => _ExpandableTextState();
+}
+
+class _ExpandableTextState extends State<_ExpandableText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.text,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+            height: 1.5,
+          ),
+          maxLines: _expanded ? null : 3,
+          overflow: _expanded ? null : TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        GestureDetector(
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Text(
+            _expanded ? '收起' : '展开',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: cs.primary,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
