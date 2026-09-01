@@ -17,6 +17,7 @@ import '../providers/netease_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/liked_songs_provider.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/artist_picker_sheet.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/fluid_background.dart';
 import '../providers/settings_provider.dart';
@@ -146,61 +147,11 @@ class _PlayerPageState extends State<PlayerPage>
     ArtistNavigation.onNavigateToArtist?.call(id, name);
   }
 
-  void _showArtistPicker(List<ArtistSummary> artists) {
-    final cs = Theme.of(context).colorScheme;
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                children: [
-                  Text(
-                    '选择歌手',
-                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            ...artists.map(
-              (a) => ListTile(
-                leading: CircleAvatar(
-                  radius: 20,
-                  backgroundColor: cs.surfaceContainerHighest,
-                  child: Text(
-                    a.name.isNotEmpty ? a.name.characters.first : '?',
-                    style: TextStyle(color: cs.onSurfaceVariant),
-                  ),
-                ),
-                title: Text(
-                  a.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () {
-                  Navigator.of(ctx).pop(); // 关闭底部弹窗
-                  if (a.id > 0) {
-                    _navigateToArtist(a.id, a.name);
-                  }
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+  void _showArtistPicker(List<ArtistSummary> artists) async {
+    final picked = await ArtistPickerSheet.show(context, artists: artists);
+    if (picked != null && picked.id > 0) {
+      _navigateToArtist(picked.id, picked.name);
+    }
   }
 
   @override
