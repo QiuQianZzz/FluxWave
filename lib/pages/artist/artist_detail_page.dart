@@ -523,6 +523,7 @@ class _ExpandableTextState extends State<_ExpandableText> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.text != widget.text) {
       _expanded = false;
+      _needExpand = false;
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkOverflow());
     }
   }
@@ -530,11 +531,9 @@ class _ExpandableTextState extends State<_ExpandableText> {
   void _checkOverflow() {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
-    // 约 3 行的高度（bodyMedium line height ~22px × 3 + 误差）
     const maxLinesHeight = 22.0 * 3 + 8;
-    if (box.size.height > maxLinesHeight && mounted) {
-      setState(() => _needExpand = true);
-    }
+    if (!mounted) return;
+    setState(() => _needExpand = box.size.height > maxLinesHeight);
   }
 
   @override
