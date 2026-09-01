@@ -68,9 +68,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     final box = ctx.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
     final heroTop = box.localToGlobal(Offset.zero).dy;
-    // stats 区域（背景图 280px 之后）到达 app bar 底部时切换，
-    // 避免白色背景在透明 app bar 下方导致按钮不可见。
-    final done = heroTop + 280 <= 56;
+    // 背景图高度占 hero 卡片前 45%，滚出 app bar 底部时切换
+    final bgHeight = box.size.height * 0.45;
+    final done = heroTop + bgHeight <= 56;
     final p = done ? 1.0 : 0.0;
     if (p != _scrollProgress) {
       setState(() => _scrollProgress = p);
@@ -305,12 +305,15 @@ class _ArtistHeroCard extends StatelessWidget {
     final name = d?.name ?? artistName ?? '';
     final coverUrl = d?.coverFull ?? d?.avatarFull;
 
+    final heroHeight = MediaQuery.sizeOf(context).width * 0.45;
+    final clampedHeight = heroHeight.clamp(280.0, 400.0);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         // ── 背景大图区域 ──
         SizedBox(
-          height: 280,
+          height: clampedHeight,
           width: double.infinity,
           child: Stack(
             fit: StackFit.expand,
@@ -412,7 +415,10 @@ class _ArtistHeroCard extends StatelessWidget {
                 ),
                 if (d.briefDesc.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  _ExpandableText(text: d.briefDesc),
+                  SizedBox(
+                    width: double.infinity,
+                    child: _ExpandableText(text: d.briefDesc),
+                  ),
                 ],
               ],
             ),
@@ -504,13 +510,39 @@ class _ExpandableText extends StatefulWidget {
 
 class _ExpandableTextState extends State<_ExpandableText> {
   bool _expanded = false;
+  bool _needExpand = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkOverflow());
+  }
+
+  @override
+  void didUpdateWidget(covariant _ExpandableText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _expanded = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkOverflow());
+    }
+  }
+
+  void _checkOverflow() {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    // 约 3 行的高度（bodyMedium line height ~22px × 3 + 误差）
+    const maxLinesHeight = 22.0 * 3 + 8;
+    if (box.size.height > maxLinesHeight && mounted) {
+      setState(() => _needExpand = true);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           widget.text,
@@ -521,16 +553,18 @@ class _ExpandableTextState extends State<_ExpandableText> {
           maxLines: _expanded ? null : 3,
           overflow: _expanded ? null : TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 4),
-        GestureDetector(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Text(
-            _expanded ? '收起' : '展开',
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: cs.primary,
+        if (_needExpand) ...[
+          const SizedBox(height: 4),
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Text(
+              _expanded ? '收起' : '展开',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: cs.primary,
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -555,7 +589,7 @@ class _ArtistTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(12),
