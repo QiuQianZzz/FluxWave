@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-09-02
+
+### 新增
+
+- 歌手详情页：展示歌手头像、简介、粉丝数、热门歌曲列表、专辑列表，支持分页加载
+- 播放页点击歌手名跳转歌手详情页，多位歌手时弹出选择抽屉
+- 歌手详情页预测性返回手势支持（透明标题栏随滚动渐变 + 拖拽关闭）
+- 播放队列中旧歌曲的歌手 ID 自动补全迁移
+
+### 优化
+
+- 歌手详情页三接口并发加载，任一失败不拖垮其他数据
+- 滚动监听节流优化，避免每帧计算布局
+- 预测性返回手势底部面板布局优化，自适应内容高度
+
 ## [v0.5.6] - 2026-08-31
 
 ### 新增
@@ -167,7 +182,9 @@
 
 ---
 
-[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.6...v0.6.0
+[v0.5.6]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.5...v0.5.6
 [v0.5.5]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.4...v0.5.5
 [v0.5.4]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.3...v0.5.4
 [v0.5.3]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.2...v0.5.3
