@@ -33,9 +33,11 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabCtrl;
   late final ArtistProvider _provider;
+  late final ScrollController _scrollCtrl;
+  final _heroKey = GlobalKey();
 
-  /// 歌手名是否已滚出可视区域（用于 SliverAppBar 标题显隐）。
-  bool _nameScrolledOff = false;
+  /// 0.0 = 在顶部（透明），1.0 = 滚动到位（不透明）。
+  double _scrollProgress = 0.0;
 
   @override
   void initState() {
@@ -43,6 +45,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     _tabCtrl = TabController(length: 2, vsync: this);
     _tabCtrl.addListener(() => setState(() {}));
     _provider = ArtistProvider();
+    _scrollCtrl = ScrollController();
+    _scrollCtrl.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _provider.loadArtist(_api, widget.artistId);
     });
@@ -50,9 +54,27 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
 
   @override
   void dispose() {
+    _scrollCtrl
+      ..removeListener(_onScroll)
+      ..dispose();
     _tabCtrl.dispose();
     _provider.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    final ctx = _heroKey.currentContext;
+    if (ctx == null) return;
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final heroTop = box.localToGlobal(Offset.zero).dy;
+    // stats 区域（背景图 280px 之后）到达 app bar 底部时切换，
+    // 避免白色背景在透明 app bar 下方导致按钮不可见。
+    final done = heroTop + 280 <= 56;
+    final p = done ? 1.0 : 0.0;
+    if (p != _scrollProgress) {
+      setState(() => _scrollProgress = p);
+    }
   }
 
   NeteaseApi get _api => context.read<NeteaseProvider>().api;
@@ -67,18 +89,6 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
 
   void _addToQueue(Song song) {
     context.read<PlayerProvider>().addToQueue(song);
-  }
-
-  /// 滚动监听：检测歌手名是否已滚出顶部。
-  bool _onScrollNotification(ScrollNotification notification) {
-    if (notification is ScrollUpdateNotification && notification.depth == 0) {
-      // 歌手名区域高度约 100px（头像68 + padding），超过此距离即视为已滚出。
-      final off = notification.metrics.pixels > 100;
-      if (off != _nameScrolledOff) {
-        setState(() => _nameScrolledOff = off);
-      }
-    }
-    return false;
   }
 
   @override
@@ -132,108 +142,139 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     final detail = state.detail;
     final displayName = detail?.name ?? widget.artistName ?? '';
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: _onScrollNotification,
-      child: CustomScrollView(
-        slivers: [
-          _ArtistAppBar(
-            title: displayName,
-            showTitle: _nameScrolledOff,
-          ),
-          SliverToBoxAdapter(
-            child: _ArtistHeroCard(
-              detail: detail,
-              artistName: widget.artistName,
-              followerCount: state.followerCount,
+    return Stack(
+      children: [
+        // ── 可滚动内容 ──
+        CustomScrollView(
+          controller: _scrollCtrl,
+          slivers: [
+            // hero 卡片从顶部开始，背景图延伸到透明 app bar 后方
+            SliverToBoxAdapter(
+              child: _ArtistHeroCard(
+                key: _heroKey,
+                detail: detail,
+                artistName: widget.artistName,
+                followerCount: state.followerCount,
+              ),
             ),
-          ),
-          SliverToBoxAdapter(
-            child: _ArtistTabs(
-              tabCtrl: _tabCtrl,
-              songsCount: state.songs.length,
-              albumsCount: state.albums.length,
+            SliverToBoxAdapter(
+              child: _ArtistTabs(
+                tabCtrl: _tabCtrl,
+                songsCount: state.songs.length,
+                albumsCount: state.albums.length,
+              ),
             ),
-          ),
-          SliverToBoxAdapter(child: const SizedBox(height: 4)),
-          if (_tabCtrl.index == 0) ...[
-            if (state.songs.isEmpty && !state.loading)
-              const SliverToBoxAdapter(child: _EmptyHint(text: '暂无歌曲'))
-            else
-              SliverFixedExtentList(
-                itemExtent: SongTile.kTileExtent,
-                delegate: SliverChildBuilderDelegate(
-                  (context, i) => SongTile(
-                    song: state.songs[i],
-                    index: i,
-                    onTap: () => _playAt(state.songs, i),
-                    onPlayNext: () => _playNext(state.songs[i]),
-                    onAddToQueue: () => _addToQueue(state.songs[i]),
+            SliverToBoxAdapter(child: const SizedBox(height: 4)),
+            if (_tabCtrl.index == 0) ...[
+              if (state.songs.isEmpty && !state.loading)
+                const SliverToBoxAdapter(child: _EmptyHint(text: '暂无歌曲'))
+              else
+                SliverFixedExtentList(
+                  itemExtent: SongTile.kTileExtent,
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) => SongTile(
+                      song: state.songs[i],
+                      index: i,
+                      onTap: () => _playAt(state.songs, i),
+                      onPlayNext: () => _playNext(state.songs[i]),
+                      onAddToQueue: () => _addToQueue(state.songs[i]),
+                    ),
+                    childCount: state.songs.length,
                   ),
-                  childCount: state.songs.length,
                 ),
-              ),
-            if (state.songsHasMore)
-              SliverToBoxAdapter(
-                child: _LoadMoreButton(
-                  loading: state.songsLoadingMore,
-                  onTap: () => state.loadMoreSongs(_api),
+              if (state.songsHasMore)
+                SliverToBoxAdapter(
+                  child: _LoadMoreButton(
+                    loading: state.songsLoadingMore,
+                    onTap: () => state.loadMoreSongs(_api),
+                  ),
                 ),
-              ),
-          ] else ...[
-            if (state.albums.isEmpty && !state.loading)
-              const SliverToBoxAdapter(child: _EmptyHint(text: '暂无专辑'))
-            else
-              SliverList.builder(
-                itemCount: state.albums.length,
-                itemBuilder: (context, i) => _AlbumTile(album: state.albums[i]),
-              ),
-            if (state.albumsHasMore)
-              SliverToBoxAdapter(
-                child: _LoadMoreButton(
-                  loading: state.albumsLoadingMore,
-                  onTap: () => state.loadMoreAlbums(_api),
+            ] else ...[
+              if (state.albums.isEmpty && !state.loading)
+                const SliverToBoxAdapter(child: _EmptyHint(text: '暂无专辑'))
+              else
+                SliverList.builder(
+                  itemCount: state.albums.length,
+                  itemBuilder: (context, i) => _AlbumTile(album: state.albums[i]),
                 ),
-              ),
+              if (state.albumsHasMore)
+                SliverToBoxAdapter(
+                  child: _LoadMoreButton(
+                    loading: state.albumsLoadingMore,
+                    onTap: () => state.loadMoreAlbums(_api),
+                  ),
+                ),
+            ],
+            const SliverToBoxAdapter(child: SizedBox(height: 80)),
           ],
-          const SliverToBoxAdapter(child: SizedBox(height: 80)),
-        ],
-      ),
+        ),
+        // ── 浮动顶部栏（覆盖在内容上方） ──
+        _ArtistFloatingAppBar(
+          title: displayName,
+          scrollProgress: _scrollProgress,
+        ),
+      ],
     );
   }
 }
 
 // =============================================================================
-// SliverAppBar：常驻返回按钮 + 条件显示歌手名
+// 浮动顶部栏：透明覆盖在 hero 上方，滚动后渐变为不透明
 // =============================================================================
 
-class _ArtistAppBar extends StatelessWidget {
+class _ArtistFloatingAppBar extends StatelessWidget {
   final String title;
-  final bool showTitle;
+  final double scrollProgress;
 
-  const _ArtistAppBar({
+  const _ArtistFloatingAppBar({
     required this.title,
-    required this.showTitle,
+    required this.scrollProgress,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SliverAppBar(
-      pinned: true,
-      // 透明背景，滚动后变为 surface 色
-      backgroundColor: cs.surface,
-      surfaceTintColor: Colors.transparent,
-      leading: IconButton(
-        onPressed: () => Navigator.of(context).pop(),
-        icon: const Icon(Icons.arrow_back_rounded),
-      ),
-      title: AnimatedOpacity(
-        opacity: showTitle ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 200),
-        child: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+    final solid = scrollProgress > 0;
+    final bgColor = solid ? cs.surface : Colors.transparent;
+    final fgColor = solid ? cs.onSurface : Colors.white;
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        color: bgColor,
+        child: SafeArea(
+          bottom: false,
+          child: SizedBox(
+            height: 56,
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(Icons.arrow_back_rounded, color: fgColor),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: AnimatedOpacity(
+                    opacity: solid ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: fgColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 48),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -250,6 +291,7 @@ class _ArtistHeroCard extends StatelessWidget {
   final int followerCount;
 
   const _ArtistHeroCard({
+    super.key,
     required this.detail,
     this.artistName,
     required this.followerCount,
@@ -278,19 +320,19 @@ class _ArtistHeroCard extends StatelessWidget {
                 CoverImage(url: coverUrl, fit: BoxFit.cover)
               else
                 Container(color: cs.surfaceContainerHighest),
-              // 渐变遮罩
+              // 渐变遮罩：顶部适度遮罩（返回按钮可读）→ 中间透明（展示图片）→ 底部深色（歌手名可读）
               const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.transparent,
+                      Colors.black38,
                       Colors.transparent,
                       Colors.black26,
                       Colors.black87,
                     ],
-                    stops: [0.0, 0.35, 0.7, 1.0],
+                    stops: [0.0, 0.15, 0.6, 1.0],
                   ),
                 ),
               ),
