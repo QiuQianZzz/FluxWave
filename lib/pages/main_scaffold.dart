@@ -43,12 +43,25 @@ class _MainScaffoldState extends State<MainScaffold> {
   bool _settingsDetailVisible = false;
   bool _profileDetailVisible = false;
 
+  /// 每个 tab 的栈顶歌手路由 name（如 'artist/123'），null 表示该 tab 栈顶不是歌手页。
+  /// 用于去重：避免从播放页多次点击同一歌手时重复 push。
+  final List<String?> _tabArtistRoute = List.filled(4, null);
+
   static const _transitionDuration = Duration(milliseconds: 300);
 
   /// 每个 tab 的嵌套导航栈（切换 tab 后各栈独立存活，见 _PageSwitcher 常驻）。
   final List<GlobalKey<NavigatorState>> _tabNavKeys = List.generate(
     4,
     (_) => GlobalKey<NavigatorState>(),
+  );
+
+  /// 每个 tab 独立的 observer（NavigatorObserver 不能跨 Navigator 共享）。
+  late final List<NavigatorObserver> _tabObservers = List.generate(
+    4,
+    (i) => _ArtistPopObserver(
+      tabIndex: i,
+      onRouteChanged: (routeName) => _tabArtistRoute[i] = routeName,
+    ),
   );
 
   /// tab 根页列表。包 [TabNavigator]：tab 内 push（歌单详情/雷达页）不盖住
@@ -62,18 +75,21 @@ class _MainScaffoldState extends State<MainScaffold> {
       key: const ValueKey('tab-0'),
       navigatorKey: _tabNavKeys[0],
       enabled: _currentIndex == 0,
+      observer: _tabObservers[0],
       child: const HomePage(),
     ),
     TabNavigator(
       key: const ValueKey('tab-1'),
       navigatorKey: _tabNavKeys[1],
       enabled: _currentIndex == 1,
+      observer: _tabObservers[1],
       child: const SearchPage(),
     ),
     TabNavigator(
       key: const ValueKey('tab-2'),
       navigatorKey: _tabNavKeys[2],
       enabled: _currentIndex == 2,
+      observer: _tabObservers[2],
       child: ProfilePage(
         onDetailChanged: (visible) =>
             setState(() => _profileDetailVisible = visible),
@@ -83,6 +99,7 @@ class _MainScaffoldState extends State<MainScaffold> {
       key: const ValueKey('tab-3'),
       navigatorKey: _tabNavKeys[3],
       enabled: _currentIndex == 3,
+      observer: _tabObservers[3],
       child: SettingsPage(
         onDetailChanged: (visible) =>
             setState(() => _settingsDetailVisible = visible),
@@ -281,15 +298,30 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 
   /// 从播放页跳转歌手页：pop 播放页（根 Navigator）→ push 歌手页到当前 tab Navigator。
+  ///
+  /// 若当前 tab 栈顶已是歌手页面，用 pushReplacement 替换，保证栈里最多只有一个歌手页。
   void _navigateToArtistFromPlayer(int id, String name) {
     final rootNav = Navigator.of(context);
-    // 仅当根 Navigator 还能 pop 时才 pop（防止歌手选择器关闭动画竞争）。
     if (rootNav.canPop()) rootNav.pop();
-    _tabNavKeys[_currentIndex].currentState?.push(
-      MaterialPageRoute(
-        builder: (_) => ArtistDetailPage(artistId: id, artistName: name),
-      ),
+
+    final tabNav = _tabNavKeys[_currentIndex].currentState;
+    if (tabNav == null) return;
+
+    final routeName = 'artist/$id';
+    final page = MaterialPageRoute(
+      builder: (_) => ArtistDetailPage(artistId: id, artistName: name),
+      settings: RouteSettings(name: routeName),
     );
+
+    final hasArtistOnTop = _tabArtistRoute[_currentIndex] != null;
+    if (hasArtistOnTop) {
+      // 先 pop 旧歌手页，再 push 新的，避免 pushReplacement 在边界条件下空栈。
+      tabNav.pop();
+      tabNav.push(page);
+    } else {
+      tabNav.push(page);
+    }
+    _tabArtistRoute[_currentIndex] = routeName;
   }
 
   @override
@@ -1119,5 +1151,48 @@ class _ToastOverlayState extends State<_ToastOverlay>
         ),
       ),
     );
+  }
+}
+
+/// 监听 tab Navigator 的 push/pop 事件，精确追踪栈顶歌手路由。
+///
+/// 用 `didPush` + `didPop` 双向追踪，比只靠 pop 更可靠：
+/// - push 歌手页时记录 routeName
+/// - pop 歌手页时清除（回退到 null）
+/// - pop 非歌手页时不清除（歌手页还在栈里）
+class _ArtistPopObserver extends NavigatorObserver {
+  final int tabIndex;
+  final void Function(String? routeName) onRouteChanged;
+  _ArtistPopObserver({required this.tabIndex, required this.onRouteChanged});
+
+  @override
+  void didPush(Route route, Route? previousRoute) {
+    final name = route.settings.name;
+    if (name != null && name.startsWith('artist/')) {
+      onRouteChanged(name);
+    }
+  }
+
+  @override
+  void didPop(Route route, Route? previousRoute) {
+    final name = route.settings.name;
+    if (name != null && name.startsWith('artist/')) {
+      // 歌手页被 pop，恢复到前一个路由的状态（可能是 null 或另一个歌手页）
+      final prevName = previousRoute?.settings.name;
+      onRouteChanged(
+        (prevName != null && prevName.startsWith('artist/')) ? prevName : null,
+      );
+    }
+  }
+
+  @override
+  void didReplace({Route? newRoute, Route? oldRoute}) {
+    final oldName = oldRoute?.settings.name;
+    final newName = newRoute?.settings.name;
+    final wasArtist = oldName?.startsWith('artist/') == true;
+    final isArtist = newName?.startsWith('artist/') == true;
+    if (wasArtist || isArtist) {
+      onRouteChanged(isArtist ? newName : null);
+    }
   }
 }

@@ -16,12 +16,14 @@ class TabNavigator extends StatefulWidget {
   final GlobalKey<NavigatorState> navigatorKey;
   final Widget child;
   final bool enabled;
+  final NavigatorObserver? observer;
 
   const TabNavigator({
     super.key,
     required this.navigatorKey,
     required this.child,
     required this.enabled,
+    this.observer,
   });
 
   @override
@@ -34,14 +36,12 @@ class _TabNavigatorState extends State<TabNavigator> {
     return NavigatorPopHandler<void>(
       enabled: widget.enabled,
       onPopWithResult: (_) {
-        // 系统返回触发 doNotPop 时，ModalRoute 会对所有注册的 PopScope 调用
-        // onPopInvokedWithResult —— 包括 disabled 的 tab。这里必须检查 enabled，
-        // 否则在 tab A 返回弹子页时，disabled 的 tab B 也会被误弹（子页被连累）。
         if (!widget.enabled) return;
         widget.navigatorKey.currentState?.maybePop();
       },
       child: Navigator(
         key: widget.navigatorKey,
+        observers: [if (widget.observer != null) widget.observer!],
         onGenerateRoute: (settings) {
           // tab 内不支持命名路由；全屏/全局页一律走 AppNav.pushNamedGlobal。
           if (settings.name != Navigator.defaultRouteName) {
