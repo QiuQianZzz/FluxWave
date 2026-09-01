@@ -164,8 +164,9 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
       },
       onVerticalDragUpdate: (details) {
         if (_dismissing) return;
-        if (details.primaryDelta != null && details.primaryDelta! > 0) {
-          _dragNotifier.value += details.primaryDelta!;
+        if (details.primaryDelta != null) {
+          final next = _dragNotifier.value + details.primaryDelta!;
+          _dragNotifier.value = next > 0 ? next : 0;
         }
       },
       onVerticalDragEnd: (details) {
