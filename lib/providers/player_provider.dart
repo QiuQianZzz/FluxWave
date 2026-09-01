@@ -985,12 +985,19 @@ class PlayerProvider extends ChangeNotifier {
     // 按 id 建索引，替换原队列中的歌曲
     final freshMap = {for (final s in fresh) s.id: s};
     var replaced = 0;
+    var skipped = 0;
     for (final idx in needBackfill) {
       final updated = freshMap[queue[idx].id];
       if (updated != null) {
         queue[idx] = updated;
         replaced++;
+      } else {
+        skipped++;
       }
+    }
+    if (skipped > 0) {
+      AppLog.warn('迁移 v1：$skipped 首歌已下架，跳过歌手 ID 补全',
+          tag: 'migration');
     }
     if (replaced == 0) return;
     // 原子写回

@@ -64,7 +64,15 @@ class ArtistPickerSheet extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           // ── 歌手列表（可滚动） ──
-          Flexible(
+          if (artists.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 48),
+              child: Center(
+                child: Text('暂无歌手', style: TextStyle(fontSize: 14)),
+              ),
+            )
+          else
+            Flexible(
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,

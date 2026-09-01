@@ -62,19 +62,26 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     super.dispose();
   }
 
+  bool _scrollScheduled = false;
+
   void _onScroll() {
-    final ctx = _heroKey.currentContext;
-    if (ctx == null) return;
-    final box = ctx.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    final heroTop = box.localToGlobal(Offset.zero).dy;
-    // 背景图高度占 hero 卡片前 45%，滚出 app bar 底部时切换
-    final bgHeight = box.size.height * 0.45;
-    final done = heroTop + bgHeight <= 56;
-    final p = done ? 1.0 : 0.0;
-    if (p != _scrollProgress) {
-      setState(() => _scrollProgress = p);
-    }
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollScheduled = false;
+      if (!mounted) return;
+      final ctx = _heroKey.currentContext;
+      if (ctx == null) return;
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      final heroTop = box.localToGlobal(Offset.zero).dy;
+      final bgHeight = box.size.height * 0.45;
+      final done = heroTop + bgHeight <= 56;
+      final p = done ? 1.0 : 0.0;
+      if (p != _scrollProgress) {
+        setState(() => _scrollProgress = p);
+      }
+    });
   }
 
   NeteaseApi get _api => context.read<NeteaseProvider>().api;
@@ -166,7 +173,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
             ),
             SliverToBoxAdapter(child: const SizedBox(height: 4)),
             if (_tabCtrl.index == 0) ...[
-              if (state.songs.isEmpty && !state.loading)
+              if (state.songsError != null && state.songs.isEmpty)
+                SliverToBoxAdapter(
+                  child: _TabError(
+                    message: '${state.songsError}',
+                    onRetry: () => state.loadArtist(_api, widget.artistId),
+                  ),
+                )
+              else if (state.songs.isEmpty && !state.loading)
                 const SliverToBoxAdapter(child: _EmptyHint(text: '暂无歌曲'))
               else
                 SliverFixedExtentList(
@@ -190,7 +204,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
                   ),
                 ),
             ] else ...[
-              if (state.albums.isEmpty && !state.loading)
+              if (state.albumsError != null && state.albums.isEmpty)
+                SliverToBoxAdapter(
+                  child: _TabError(
+                    message: '${state.albumsError}',
+                    onRetry: () => state.loadArtist(_api, widget.artistId),
+                  ),
+                )
+              else if (state.albums.isEmpty && !state.loading)
                 const SliverToBoxAdapter(child: _EmptyHint(text: '暂无专辑'))
               else
                 SliverList.builder(
@@ -529,11 +550,20 @@ class _ExpandableTextState extends State<_ExpandableText> {
   }
 
   void _checkOverflow() {
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    const maxLinesHeight = 22.0 * 3 + 8;
     if (!mounted) return;
-    setState(() => _needExpand = box.size.height > maxLinesHeight);
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: cs.onSurfaceVariant,
+      height: 1.5,
+    );
+    final tp = TextPainter(
+      text: TextSpan(text: widget.text, style: style),
+      maxLines: 3,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: context.size?.width ?? double.infinity);
+    setState(() => _needExpand = tp.didExceedMaxLines);
+    tp.dispose();
   }
 
   @override
@@ -645,7 +675,6 @@ class _AlbumTile extends StatelessWidget {
         '${album.size} 首歌',
         style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
       ),
-      trailing: Icon(Icons.chevron_right_rounded, color: cs.outline),
     );
   }
 }
@@ -668,6 +697,45 @@ class _EmptyHint extends StatelessWidget {
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TabError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _TabError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 32),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_rounded, size: 40, color: cs.outlineVariant),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('重试'),
+            ),
+          ],
         ),
       ),
     );

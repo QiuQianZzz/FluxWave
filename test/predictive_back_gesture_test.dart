@@ -137,4 +137,141 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('sheet'), findsNothing);
   });
+
+  // ── 拖拽关闭（onDismiss） ──
+
+  testWidgets('下拉超过 80px 阈值后松手触发 onDismiss', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => Center(
+              child: ElevatedButton(
+                onPressed: () {
+                  showPredictiveBackSheet<void>(
+                    ctx,
+                    builder: (_) => const SizedBox(
+                      height: 300,
+                      child: Center(child: Text('sheet')),
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsOneWidget);
+
+    // 下拉 100px（> 80 阈值）
+    final center = tester.getCenter(find.text('sheet'));
+    await tester.dragFrom(center, const Offset(0, 100));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsNothing);
+  });
+
+  testWidgets('下拉不足 80px 松手后回弹', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => Center(
+              child: ElevatedButton(
+                onPressed: () {
+                  showPredictiveBackSheet<void>(
+                    ctx,
+                    builder: (_) => const SizedBox(
+                      height: 300,
+                      child: Center(child: Text('sheet')),
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsOneWidget);
+
+    // 下拉 50px（< 80 阈值），松手后回弹
+    final center = tester.getCenter(find.text('sheet'));
+    await tester.dragFrom(center, const Offset(0, 50));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsOneWidget);
+  });
+
+  testWidgets('快速甩动（velocity > 800）即使 < 80px 也关闭', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => Center(
+              child: ElevatedButton(
+                onPressed: () {
+                  showPredictiveBackSheet<void>(
+                    ctx,
+                    builder: (_) => const SizedBox(
+                      height: 300,
+                      child: Center(child: Text('sheet')),
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsOneWidget);
+
+    // 快速向下甩（fling 产生高速度）
+    await tester.fling(find.text('sheet'), const Offset(0, 50), 2000);
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsNothing);
+  });
+
+  testWidgets('向上拖拽被忽略，不会关闭', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => Center(
+              child: ElevatedButton(
+                onPressed: () {
+                  showPredictiveBackSheet<void>(
+                    ctx,
+                    builder: (_) => const SizedBox(
+                      height: 300,
+                      child: Center(child: Text('sheet')),
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsOneWidget);
+
+    // 向上拖拽
+    final center = tester.getCenter(find.text('sheet'));
+    await tester.dragFrom(center, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    expect(find.text('sheet'), findsOneWidget);
+  });
 }

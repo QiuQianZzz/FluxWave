@@ -129,6 +129,8 @@ class _MainScaffoldState extends State<MainScaffold> {
     _playerRef?.removeListener(_onPlayerChanged);
     _playerRef = null;
     _toastTimer?.cancel();
+    // 避免 MainScaffold 重建后回调持有过期的 State 引用。
+    ArtistNavigation.onNavigateToArtist = null;
     super.dispose();
   }
 
@@ -280,7 +282,9 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   /// 从播放页跳转歌手页：pop 播放页（根 Navigator）→ push 歌手页到当前 tab Navigator。
   void _navigateToArtistFromPlayer(int id, String name) {
-    Navigator.of(context).pop();
+    final rootNav = Navigator.of(context);
+    // 仅当根 Navigator 还能 pop 时才 pop（防止歌手选择器关闭动画竞争）。
+    if (rootNav.canPop()) rootNav.pop();
     _tabNavKeys[_currentIndex].currentState?.push(
       MaterialPageRoute(
         builder: (_) => ArtistDetailPage(artistId: id, artistName: name),
