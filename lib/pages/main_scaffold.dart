@@ -123,7 +123,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // 设置静态回调（仅一次）
-    ArtistNavigation.onNavigateToArtist ??= _navigateToArtistFromPlayer;
+    ArtistNavigation.onNavigateToArtist = _navigateToArtistFromPlayer;
     final player = context.read<PlayerProvider>();
     if (_playerRef != player) {
       _playerRef?.removeListener(_onPlayerChanged);

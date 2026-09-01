@@ -175,7 +175,13 @@ class _PredictiveBackGestureState extends State<PredictiveBackGesture>
         if (_dragNotifier.value > 80 || v > 800) {
           _dismissing = true;
           widget.onDismiss?.call();
-          // 保持当前偏移，pop 动画完成后由 route 移除 widget 树自动清理。
+          // 微任务后检查：若 route 仍在（pop 失败），重置 flag 允许重试。
+          Future.microtask(() {
+            if (mounted && _dismissing) {
+              _dismissing = false;
+              _dragNotifier.value = 0;
+            }
+          });
           return;
         }
         _dragNotifier.value = 0;

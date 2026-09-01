@@ -31,6 +31,9 @@ class TabNavigator extends StatefulWidget {
 }
 
 class _TabNavigatorState extends State<TabNavigator> {
+  late final List<NavigatorObserver> _observers =
+      [if (widget.observer != null) widget.observer!];
+
   @override
   Widget build(BuildContext context) {
     return NavigatorPopHandler<void>(
@@ -41,7 +44,7 @@ class _TabNavigatorState extends State<TabNavigator> {
       },
       child: Navigator(
         key: widget.navigatorKey,
-        observers: [if (widget.observer != null) widget.observer!],
+        observers: _observers,
         onGenerateRoute: (settings) {
           // tab 内不支持命名路由；全屏/全局页一律走 AppNav.pushNamedGlobal。
           if (settings.name != Navigator.defaultRouteName) {

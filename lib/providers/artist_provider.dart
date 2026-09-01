@@ -65,7 +65,7 @@ class ArtistProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    // 并发拉取三个接口，各自独立容错。
+    // 真并发拉取三个接口，各自独立容错。
     ArtistDetail? loadedDetail;
     int loadedFollowerCount = 0;
     List<Song> loadedSongs = const [];
@@ -76,58 +76,75 @@ class ArtistProvider extends ChangeNotifier {
     Object? songsErr;
     Object? albumsErr;
 
-    // detail
-    try {
-      final resp = await api.artistDetail(id);
-      if (_loadToken != savedToken) return;
-      final detailData = resp['data'];
-      final artist = (detailData is Map) ? detailData['artist'] : resp['artist'];
-      if (artist is Map) {
-        loadedDetail = ArtistDetail.fromJson(Map<String, dynamic>.from(artist));
-      } else {
-        loadedDetail = ArtistDetail(id: id, name: '');
-      }
-      if (detailData is Map) {
-        loadedFollowerCount = detailData['followerCount'] as int? ?? 0;
-      }
-    } catch (e) {
-      if (_loadToken != savedToken) return;
+    // 三个请求同时发出，各自 catch 不互相拖垮。
+    final detailFuture = api.artistDetail(id).catchError((Object e) {
       detailErr = e;
-    }
-
-    // songs
-    try {
-      final resp = await api.artistSongs(id, limit: _kSongPageSize);
-      if (_loadToken != savedToken) return;
-      final rawSongs = resp['songs'];
-      if (rawSongs is List) {
-        loadedSongs = rawSongs
-            .whereType<Map>()
-            .map((s) => Song.fromSearch(Map<String, dynamic>.from(s)))
-            .toList(growable: false);
-      }
-      loadedSongsMore = resp['more'] == true;
-    } catch (e) {
-      if (_loadToken != savedToken) return;
+      return <String, dynamic>{};
+    });
+    final songsFuture = api.artistSongs(id, limit: _kSongPageSize).catchError((Object e) {
       songsErr = e;
+      return <String, dynamic>{};
+    });
+    final albumsFuture = api.artistAlbums(id, limit: _kAlbumPageSize).catchError((Object e) {
+      albumsErr = e;
+      return <String, dynamic>{};
+    });
+    final results = await Future.wait([detailFuture, songsFuture, albumsFuture]);
+
+    if (_loadToken != savedToken) return;
+
+    // 解析 detail
+    if (detailErr == null) {
+      try {
+        final resp = results[0];
+        final detailData = resp['data'];
+        final artist = (detailData is Map) ? detailData['artist'] : resp['artist'];
+        if (artist is Map) {
+          loadedDetail = ArtistDetail.fromJson(Map<String, dynamic>.from(artist));
+        } else {
+          loadedDetail = ArtistDetail(id: id, name: '');
+        }
+        if (detailData is Map) {
+          loadedFollowerCount = detailData['followerCount'] as int? ?? 0;
+        }
+      } catch (e) {
+        detailErr = e;
+      }
     }
 
-    // albums
-    try {
-      final resp = await api.artistAlbums(id, limit: _kAlbumPageSize);
-      if (_loadToken != savedToken) return;
-      final rawAlbums = resp['hotAlbums'];
-      if (rawAlbums is List) {
-        loadedAlbums = rawAlbums
-            .whereType<Map>()
-            .map((a) => AlbumSummary.fromJson(Map<String, dynamic>.from(a)))
-            .where((a) => a.id > 0 && a.name.isNotEmpty)
-            .toList(growable: false);
+    // 解析 songs
+    if (songsErr == null) {
+      try {
+        final resp = results[1];
+        final rawSongs = resp['songs'];
+        if (rawSongs is List) {
+          loadedSongs = rawSongs
+              .whereType<Map>()
+              .map((s) => Song.fromSearch(Map<String, dynamic>.from(s)))
+              .toList(growable: false);
+        }
+        loadedSongsMore = resp['more'] == true;
+      } catch (e) {
+        songsErr = e;
       }
-      loadedAlbumsMore = resp['more'] == true;
-    } catch (e) {
-      if (_loadToken != savedToken) return;
-      albumsErr = e;
+    }
+
+    // 解析 albums
+    if (albumsErr == null) {
+      try {
+        final resp = results[2];
+        final rawAlbums = resp['hotAlbums'];
+        if (rawAlbums is List) {
+          loadedAlbums = rawAlbums
+              .whereType<Map>()
+              .map((a) => AlbumSummary.fromJson(Map<String, dynamic>.from(a)))
+              .where((a) => a.id > 0 && a.name.isNotEmpty)
+              .toList(growable: false);
+        }
+        loadedAlbumsMore = resp['more'] == true;
+      } catch (e) {
+        albumsErr = e;
+      }
     }
 
     if (_loadToken != savedToken) return;
@@ -165,7 +182,10 @@ class ArtistProvider extends ChangeNotifier {
 
     try {
       final m = await api.artistSongs(id, offset: _songOffset, limit: _kSongPageSize);
-      if (_loadToken != token) return;
+      if (_loadToken != token) {
+        _songsLoadingMore = false;
+        return;
+      }
 
       final raw = m['songs'];
       if (raw is List) {
@@ -180,7 +200,10 @@ class ArtistProvider extends ChangeNotifier {
       _songsLoadingMore = false;
       notifyListeners();
     } catch (e, st) {
-      if (_loadToken != token) return;
+      if (_loadToken != token) {
+        _songsLoadingMore = false;
+        return;
+      }
       AppLog.warn('歌手歌曲加载更多失败', tag: 'artist', error: e, stack: st);
       _songsLoadingMore = false;
       notifyListeners();
@@ -197,7 +220,10 @@ class ArtistProvider extends ChangeNotifier {
 
     try {
       final m = await api.artistAlbums(id, offset: _albumOffset, limit: _kAlbumPageSize);
-      if (_loadToken != token) return;
+      if (_loadToken != token) {
+        _albumsLoadingMore = false;
+        return;
+      }
 
       final raw = m['hotAlbums'];
       if (raw is List) {
@@ -213,7 +239,10 @@ class ArtistProvider extends ChangeNotifier {
       _albumsLoadingMore = false;
       notifyListeners();
     } catch (e, st) {
-      if (_loadToken != token) return;
+      if (_loadToken != token) {
+        _albumsLoadingMore = false;
+        return;
+      }
       AppLog.warn('歌手专辑加载更多失败', tag: 'artist', error: e, stack: st);
       _albumsLoadingMore = false;
       notifyListeners();

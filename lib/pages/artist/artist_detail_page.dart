@@ -43,7 +43,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
-    _tabCtrl.addListener(() => setState(() {}));
+    _tabCtrl.animation?.addListener(_onTabAnimTick);
     _provider = ArtistProvider();
     _scrollCtrl = ScrollController();
     _scrollCtrl.addListener(_onScroll);
@@ -52,11 +52,22 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
     });
   }
 
+  /// 仅在 tab index 实际变化时触发重建，避免滑动动画每帧 setState。
+  int _lastTabIndex = 0;
+  void _onTabAnimTick() {
+    final newIndex = _tabCtrl.index;
+    if (newIndex != _lastTabIndex) {
+      _lastTabIndex = newIndex;
+      setState(() {});
+    }
+  }
+
   @override
   void dispose() {
     _scrollCtrl
       ..removeListener(_onScroll)
       ..dispose();
+    _tabCtrl.animation?.removeListener(_onTabAnimTick);
     _tabCtrl.dispose();
     _provider.dispose();
     super.dispose();
