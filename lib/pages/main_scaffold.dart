@@ -6,9 +6,11 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:provider/provider.dart';
 
 import '../constants/nav_thresholds.dart';
+import '../core/navigation/album_navigation.dart';
 import '../core/navigation/artist_navigation.dart';
 import '../core/platform_utils.dart';
 import '../core/update_service.dart';
+import '../pages/album/album_detail_page.dart';
 import '../pages/artist/artist_detail_page.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
@@ -124,6 +126,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     super.didChangeDependencies();
     // 设置静态回调（仅一次）
     ArtistNavigation.onNavigateToArtist = _navigateToArtistFromPlayer;
+    AlbumNavigation.onNavigateToAlbum = _navigateToAlbumFromPlayer;
     final player = context.read<PlayerProvider>();
     if (_playerRef != player) {
       _playerRef?.removeListener(_onPlayerChanged);
@@ -148,6 +151,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     _toastTimer?.cancel();
     // 避免 MainScaffold 重建后回调持有过期的 State 引用。
     ArtistNavigation.onNavigateToArtist = null;
+    AlbumNavigation.onNavigateToAlbum = null;
     super.dispose();
   }
 
@@ -322,6 +326,21 @@ class _MainScaffoldState extends State<MainScaffold> {
       tabNav.push(page);
     }
     _tabArtistRoute[_currentIndex] = routeName;
+  }
+
+  void _navigateToAlbumFromPlayer(int id, String name) {
+    final rootNav = Navigator.of(context);
+    if (rootNav.canPop()) rootNav.pop();
+
+    final tabNav = _tabNavKeys[_currentIndex].currentState;
+    if (tabNav == null) return;
+
+    final routeName = 'album/$id';
+    final page = MaterialPageRoute(
+      builder: (_) => AlbumDetailPage(albumId: id, albumName: name),
+      settings: RouteSettings(name: routeName),
+    );
+    tabNav.push(page);
   }
 
   @override

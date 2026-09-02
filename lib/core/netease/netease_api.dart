@@ -86,6 +86,18 @@ class NeteaseApi {
     return (r is Map) ? Map<String, dynamic>.from(r) : {};
   }
 
+  /// 专辑详情 + 歌曲列表（weapi 模式；端点 `/api/v1/album/{id}`）。
+  ///
+  /// 返回 `{code, album: {id, name, picUrl, artists, ...}, songs: [...]}`。
+  Future<Map<String, dynamic>> albumDetail(int id) async {
+    final r = await client.request(
+      '/api/v1/album/$id',
+      <String, Object>{},
+      NeteaseMode.weapi,
+    );
+    return (r is Map) ? Map<String, dynamic>.from(r) : {};
+  }
+
   // ---------------------------------------------------------------------------
   // 推荐 / 每日
   // ---------------------------------------------------------------------------

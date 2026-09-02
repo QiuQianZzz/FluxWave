@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/navigation/album_navigation.dart';
 import '../../core/netease/netease_api.dart';
 import '../../models/album.dart';
 import '../../models/artist.dart';
@@ -227,7 +228,13 @@ class _ArtistDetailPageState extends State<ArtistDetailPage>
               else
                 SliverList.builder(
                   itemCount: state.albums.length,
-                  itemBuilder: (context, i) => _AlbumTile(album: state.albums[i]),
+                  itemBuilder: (context, i) => _AlbumTile(
+                    album: state.albums[i],
+                    onTap: () => AlbumNavigation.onNavigateToAlbum?.call(
+                      state.albums[i].id,
+                      state.albums[i].name,
+                    ),
+                  ),
                 ),
               if (state.albumsHasMore)
                 SliverToBoxAdapter(
@@ -656,7 +663,8 @@ class _ArtistTabs extends StatelessWidget {
 
 class _AlbumTile extends StatelessWidget {
   final AlbumSummary album;
-  const _AlbumTile({required this.album});
+  final VoidCallback? onTap;
+  const _AlbumTile({required this.album, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -664,6 +672,7 @@ class _AlbumTile extends StatelessWidget {
     final cs = theme.colorScheme;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      onTap: onTap,
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: SizedBox(
