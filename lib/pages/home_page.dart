@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/app_build_info.dart';
 import '../core/navigation/app_nav.dart';
+import '../core/window_utils.dart';
 import '../models/playlist.dart';
 import '../providers/home_provider.dart';
 import '../providers/netease_provider.dart';
@@ -102,15 +103,16 @@ class _HomePageState extends State<HomePage> {
                     // 「FluxWave」随滚动高度塌缩成稍小一档的标题常驻顶部。
                     // 用 Stack + ClipRect 而非 Flex 列实现交叉淡化：超大字号下内容
                     // 超高时被裁剪而非抛 RenderFlex overflow（布局测试兜底）。
+                    // 小窗模式下减小展开高度。
                     SliverAppBar(
                       pinned: true,
                       primary: false,
                       automaticallyImplyLeading: false,
                       backgroundColor: theme.colorScheme.surface,
-                      expandedHeight: 148,
+                      expandedHeight: WindowUtils.sliverAppBarHeight(context),
                       flexibleSpace: CollapsingPinnedTitle(
                         text: 'FluxWave',
-                        expandedHeight: 148,
+                        expandedHeight: WindowUtils.sliverAppBarHeight(context),
                         trailing: AppBuildInfo.isDebug
                             ? const DevBadge()
                             : null,

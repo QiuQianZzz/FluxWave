@@ -11,6 +11,7 @@ import '../core/navigation/artist_navigation.dart';
 import '../core/lyric/lyric_model.dart';
 import '../core/lyric/lyric_provider.dart';
 import '../core/platform_utils.dart';
+import '../core/window_utils.dart';
 import '../constants/nav_thresholds.dart';
 import '../models/artist.dart';
 import '../models/song.dart';
@@ -180,6 +181,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 保证任意封面下都清晰可读。亮色封面只影响背景点缀与强调色，不切换主题。
     final theme = themeProvider.darkTheme;
     final song = player.currentSong;
+    // Mediaquery.padding已在main.dart的_AndroidSmallWindowFix中全局修正
     final sysTopPad = MediaQuery.paddingOf(context).top;
     final topPad = sysTopPad + _extraTop(context);
     // 宽屏分栏（≥600）：左侧播放器 + 右侧歌词常驻，去掉滑动切换。
@@ -464,6 +466,10 @@ class _PlayerPageState extends State<PlayerPage>
   double _coverSizeLarge(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
     final h = MediaQuery.sizeOf(context).height;
+    // 小窗模式下使用更小的封面尺寸
+    if (WindowUtils.isSmallWindow(context)) {
+      return math.min<double>(w * 0.5, h * 0.25).clamp(80.0, 180.0);
+    }
     return math.min<double>(w * 0.6, h * 0.32).clamp(180.0, 280.0);
   }
 
@@ -501,6 +507,7 @@ class _PlayerPageState extends State<PlayerPage>
     final backBtnCenterY = topPad + backBtnSize / 2;
 
     // 控件区固定高度估算（进度条 + gap + 按钮行 + gap + 音质）
+    // 保持原始估算值，小窗模式下由布局自动适应
     const controlsH = 14 + 35 + 10 + 52 + 14 + 20.0;
     // 标题区高度：t=0 约 50（titleLarge+gap+bodyMedium），t=1 约 40（titleMedium+gap+bodySmall）
     const titleH0 = 50.0;
@@ -535,6 +542,7 @@ class _PlayerPageState extends State<PlayerPage>
                       controlsH -
                       extraBottom)
                   .clamp(0.0, maxH);
+          // 小窗模式下保持合理的间距，但不过度压缩
           final edgePad0 = freeH0 / 2;
           // 封面 t=0 位置：水平居中，略上移（edgePad 的 40%）让上方留白少、
           // 下方与进度条分离更明显
@@ -573,6 +581,8 @@ class _PlayerPageState extends State<PlayerPage>
           // 切换仅靠 Opacity 淡入淡出——歌词区本来就在那里 ──
           final lyricsTop = titleTop1 + titleH1 + 12;
           final lyricsBottom = controlsBottom1 + controlsH + 12;
+          // 歌词面板高度：当可用空间不足时允许为0（通过Opacity隐藏）
+          // 不强制最小高度，避免布局异常
           final lyricsH = (maxH - lyricsTop - lyricsBottom).clamp(0.0, maxH);
 
           // ── 字号插值 ──

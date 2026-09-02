@@ -10,6 +10,7 @@ import '../core/navigation/album_navigation.dart';
 import '../core/navigation/artist_navigation.dart';
 import '../core/platform_utils.dart';
 import '../core/update_service.dart';
+import '../core/window_utils.dart';
 import '../pages/album/album_detail_page.dart';
 import '../pages/artist/artist_detail_page.dart';
 import '../providers/player_provider.dart';
@@ -17,7 +18,6 @@ import '../providers/settings_provider.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/glass_surface.dart';
 import '../widgets/mini_player.dart';
-import '../widgets/page_scroll_view.dart';
 import '../widgets/title_bar.dart';
 import '../widgets/update_dialog.dart';
 import 'home_page.dart';
@@ -357,12 +357,14 @@ class _MainScaffoldState extends State<MainScaffold> {
     final mq = MediaQuery.of(context);
     // 键盘弹出时导航/小播放器被键盘遮挡（固定在屏幕底部），页面无需为它们预留留白。
     final keyboardOpen = mq.viewInsets.bottom > 0;
+    // 小窗模式使用动态高度
     final clearance = keyboardOpen
         ? 0.0
-        : kFloatingNavHeight +
-              mq.padding.bottom +
-              16 +
-              (hasSong ? kMiniPlayerClearance : 0);
+        : WindowUtils.pageBottomClearance(
+            context,
+            hasSong: hasSong,
+            keyboardOpen: keyboardOpen,
+          );
     return Provider<double?>.value(
       value: clearance,
       child: Stack(
@@ -385,7 +387,7 @@ class _MainScaffoldState extends State<MainScaffold> {
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: EdgeInsets.only(
-                  bottom: kFloatingNavHeight + mq.padding.bottom,
+                  bottom: WindowUtils.floatingNavHeight(context) + mq.padding.bottom,
                 ),
                 child: const MiniPlayer(),
               ),

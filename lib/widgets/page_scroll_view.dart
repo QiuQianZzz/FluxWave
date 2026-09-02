@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/window_utils.dart';
+
 /// 悬浮底部导航高度（M3 NavigationBar 默认高）。MainScaffold 与 [PageScrollView] 共用，
 /// 避免两处各自写死漂移。
+///
+/// 注意：小窗模式下应使用 [WindowUtils.floatingNavHeight] 获取动态值。
 const double kFloatingNavHeight = 80;
 
 /// 迷你播放器悬浮于导航上方，额外占用的高度（卡片高 + 底部内边距 + 间距）。
 /// 由 MainScaffold 在播放时计入注入的留白值，页面滚动容器自动读取。
+///
+/// 注意：小窗模式下应使用 [WindowUtils.miniPlayerClearance] 获取动态值。
 const double kMiniPlayerClearance = 100;
 
 /// 页面滚动内容底部留白（不含小播放器）：导航高度 + 系统底部手势区 inset + 间距。
@@ -14,9 +20,15 @@ const double kMiniPlayerClearance = 100;
 ///
 /// 仅在 MainScaffold 未注入留白值时的兜底（测试 / 页面独立渲染场景）；
 /// 真实应用中 MainScaffold 会通过 `Provider<double>` 注入播放中额外叠加的小播放器高度。
+///
+/// 小窗模式下自动缩减留白高度。
 double _baseClearance(BuildContext context) {
   final mq = MediaQuery.of(context);
   if (mq.viewInsets.bottom > 0) return 0;
+  // 小窗模式使用动态高度
+  if (WindowUtils.isSmallWindow(context)) {
+    return WindowUtils.floatingNavHeight(context) + mq.padding.bottom + 4;
+  }
   return kFloatingNavHeight + mq.padding.bottom + 16;
 }
 

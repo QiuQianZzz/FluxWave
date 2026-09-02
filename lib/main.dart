@@ -227,17 +227,19 @@ class _FluxWaveAppState extends State<FluxWaveApp>
           );
           return AnnotatedRegion<SystemUiOverlayStyle>(
             value: uiStyle,
-            child: MaterialApp(
-              title: kDebugMode ? 'FluxWave Dev' : 'FluxWave',
-              debugShowCheckedModeBanner: false,
-              theme: tp.lightTheme,
-              darkTheme: tp.darkTheme,
-              themeMode: tp.themeMode,
-              // 轻量本地化：仅把文本选择菜单的「复制/全选」译为中文，体积零成本。
-              // WidgetsLocalizations 由框架自动兜底（DefaultWidgetsLocalizations）。
-              localizationsDelegates: const [ZhLocalizationsDelegate()],
-              home: const MainScaffold(),
-              routes: {'/login/qr': (context) => const QrLoginPage()},
+            child: _AndroidSmallWindowFix(
+              child: MaterialApp(
+                title: kDebugMode ? 'FluxWave Dev' : 'FluxWave',
+                debugShowCheckedModeBanner: false,
+                theme: tp.lightTheme,
+                darkTheme: tp.darkTheme,
+                themeMode: tp.themeMode,
+                // 轻量本地化：仅把文本选择菜单的「复制/全选」译为中文，体积零成本。
+                // WidgetsLocalizations 由框架自动兜底（DefaultWidgetsLocalizations）。
+                localizationsDelegates: const [ZhLocalizationsDelegate()],
+                home: const MainScaffold(),
+                routes: {'/login/qr': (context) => const QrLoginPage()},
+              ),
             ),
           );
         },
@@ -467,5 +469,65 @@ class _CoverSeedWatcherState extends State<_CoverSeedWatcher> {
   void dispose() {
     _debounce?.cancel();
     super.dispose();
+  }
+}
+
+/// Android小窗模式下的MediaQuery.padding修正。
+///
+/// 在Android freeform/small window模式下，Flutter存在已知bug：
+/// MediaQuery.padding会返回异常大的值（如top=640），导致SafeArea
+/// 把内容推到可视区域之外。
+///
+/// 这个Widget在MaterialApp级别修正MediaQuery，让所有子Widget都能
+/// 使用正确的padding值。
+///
+/// 参考：https://github.com/flutter/flutter/issues/161086
+class _AndroidSmallWindowFix extends StatelessWidget {
+  final Widget child;
+
+  const _AndroidSmallWindowFix({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    // 只在Android平台需要修正
+    if (!PlatformUtils.isAndroid) {
+      return child;
+    }
+
+    final mq = MediaQuery.of(context);
+    final padding = mq.padding;
+    final size = mq.size;
+
+    // 检测top padding是否异常
+    // 正常情况下，top padding应该在0-100之间
+    // 如果超过窗口高度的30%，或者是正常最大值的5倍以上，认为是异常的
+    double top = padding.top;
+    if (top > size.height * 0.3 || top > 500) {
+      top = 0.0;
+    }
+
+    // 检测bottom padding是否异常
+    double bottom = padding.bottom;
+    if (bottom > size.height * 0.2 || bottom > 300) {
+      bottom = 0.0;
+    }
+
+    // 如果padding正常，直接返回child
+    if (top == padding.top && bottom == padding.bottom) {
+      return child;
+    }
+
+    // 修正padding
+    final fixedPadding = EdgeInsets.only(
+      left: padding.left,
+      top: top,
+      right: padding.right,
+      bottom: bottom,
+    );
+
+    return MediaQuery(
+      data: mq.copyWith(padding: fixedPadding),
+      child: child,
+    );
   }
 }
