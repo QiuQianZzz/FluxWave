@@ -1,33 +1,37 @@
 # TODO
 
-## Android 小窗模式布局适配
+## ~~Android 小窗模式布局适配~~ ✅ 已完成
 
 ### 问题概述
 
-Android freeform/small window 模式下，除小播放器和底部 Tab 栏外所有内容不可见。根因是全页面布局假设全屏高度，固定常量在小窗（300-400px）下挤占全部空间。
+小米澎湃系统（HyperOS 2.0+）的小窗模式下，系统返回了错误的WindowInsets值，导致MediaQuery.padding.top异常增大（如从38变成640），SafeArea把内容推到可视区域之外，页面内容不可见。
 
-### 关键问题
+这是澎湃系统的bug，原生Android和其他厂商系统不受影响。
 
-| 优先级 | 问题 | 位置 | 说明 |
-|--------|------|------|------|
-| P0 | 底部固定占用 ~196px | `page_scroll_view.dart:6,10` | `kFloatingNavHeight(80) + kMiniPlayerClearance(100) + 16`，小窗 350px 时只剩 154px 给内容 |
-| P0 | 播放页 `freeH0` 归零 | `player_page.dart:469-478` | 封面+控件+标题合计 ~447px，小窗高度不够时全部堆叠重叠 |
-| P1 | 封面最小 180px | `player_page.dart:407` | `.clamp(180.0, 280.0)` 强制最小尺寸，小窗下封面占 60% 高度 |
-| P1 | 首页 SliverAppBar 148px | `home_page.dart:110` | 展开高度 148 + 底部栏 196 = 344px，小窗下内容区高度为负 |
-| P1 | 歌词面板高度归零 | `player_page.dart:514-516` | 窗口 < 280px 时 `lyricsH` clamp 到 0，歌词不可见 |
-| P2 | 600px 断点不适配 | `main_scaffold.dart:281` | 小窗 400px 宽触发底部栏布局，但高度不够 |
-| P2 | 导航栏 padding 剥离 | `main_scaffold.dart:371-376` | `MediaQuery.removePadding` 在小窗下可能导致手势区对齐异常 |
-| P2 | 宽布局迷你播放器无底部偏移 | `main_scaffold.dart:470-473` | `Align(bottomCenter)` 没加 `mq.padding.bottom`，可能和系统手势区重叠 |
-| P3 | 控件高度魔数 145px | `player_page.dart:444` | `controlsH` 不随窗口缩放，小窗下定位偏移 |
-| P3 | 队列面板 85% 高度 | `queue_sheet.dart:187` | 小窗 200px 时仅 170px，列表项几乎无法显示 |
+参考：https://github.com/flutter/flutter/issues/161086
 
-### 修复方向
+### 解决方案
 
-1. **底部常量改为动态计算**：`kFloatingNavHeight` 和 `kMiniPlayerClearance` 应基于 `MediaQuery` 动态调整，或在小窗模式下缩减
-2. **播放页布局兜底**：`freeH0` 归零时切换到紧凑布局（封面缩小、控件下沉）
-3. **封面尺寸自适应**：去掉 `.clamp(180.0, 280.0)` 的最小值限制，或根据窗口高度动态调整
-4. **首页 SliverAppBar**：小窗下减小 `expandedHeight`
-5. **断点调整**：考虑加入窗口高度判断，小窗强制使用紧凑布局
+1. **全局修正MediaQuery.padding**（main.dart）
+   - 添加 `_AndroidSmallWindowFix` Widget包裹MaterialApp
+   - 检测top padding是否异常（超过窗口高度30%或超过500）
+   - 异常时重置为0，让SafeArea正常工作
+
+2. **小窗模式布局自适应**（window_utils.dart）
+   - 添加 `WindowUtils` 工具类
+   - 提供小窗模式检测：`isSmallWindow`、`isCompactWindow`
+   - 提供自适应参数：`floatingNavHeight`、`miniPlayerClearance`、`playerCoverSize`等
+
+### 修改文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `lib/main.dart` | 添加 `_AndroidSmallWindowFix` 全局修正 |
+| `lib/core/window_utils.dart` | 添加小窗模式检测和自适应布局参数 |
+| `lib/pages/player_page.dart` | 使用自适应封面尺寸 |
+| `lib/pages/home_page.dart` | 使用自适应SliverAppBar高度 |
+| `lib/widgets/page_scroll_view.dart` | 使用自适应底部留白 |
+| `lib/pages/main_scaffold.dart` | 使用自适应导航栏高度 |
 
 ---
 
@@ -56,7 +60,7 @@ Android freeform/small window 模式下，除小播放器和底部 Tab 栏外所
 
 **方案**：提取 `SongActions` mixin，统一 toast 文案和 `PlayerProvider` 调用。
 
-#### 2b. `_coverFallback` — 8文件重复
+#### 2b. `_coverFallback` — 8文件重复 ✅ 已完成
 
 | 文件 | 行号 |
 |------|------|
@@ -69,7 +73,7 @@ Android freeform/small window 模式下，除小播放器和底部 Tab 栏外所
 | `pages/playlist/playlist_detail_page.dart` | 324 |
 | `widgets/queue_sheet.dart` | 513 |
 
-**方案**：提取 `CoverPlaceholder` widget 到 `cover_image.dart`。
+**方案**：已提取 `CoverPlaceholder` widget 到 `cover_image.dart`。
 
 #### 2c. 错误占位 widget — 5个私有副本
 
@@ -118,15 +122,15 @@ Android freeform/small window 模式下，除小播放器和底部 Tab 栏外所
 
 ### 修复计划
 
-| 优先级 | 任务 | 收益 |
-|--------|------|------|
-| 🔴 P0 | 拆分 `player_provider.dart` — 提取 `QueueManager`（队列+shuffle+播放顺序） | 降低God Object风险 |
-| 🔴 P0 | 拆分 `player_provider.dart` — 提取 `PlaybackStatsManager`（统计+最近播放+迁移） | 职责分离 |
-| 🔴 P0 | 拆分 `player_provider.dart` — 提取 `UrlResolver`（URL解析+音质+缓冲） | 可测试性提升 |
-| 🔴 P0 | 提取 `SongActions` mixin — 统一 `_playNext`/`_addToQueue`/`_playAt` + toast | 消除5处重复 |
-| 🟡 P1 | 提取 `CoverPlaceholder` 到 `cover_image.dart` | 消除8处重复 |
-| 🟡 P1 | 提取 `PlayAllHeader` widget | 消除2处重复 |
-| 🟡 P1 | 提取 `ErrorPlaceholder` widget | 消除5处重复 |
-| 🟢 P2 | 统一状态管理 — setState派改用Provider | 降低认知负担 |
-| 🟢 P2 | 拆分 `player_page.dart` — 进度条/控制区/歌词区分离 | 可读性提升 |
-| 🟢 P2 | 拆分 `main_scaffold.dart` — 侧边栏/导航/响应式分离 | 可读性提升 |
+| 优先级 | 任务 | 收益 | 状态 |
+|--------|------|------|------|
+| 🔴 P0 | 拆分 `player_provider.dart` — 提取 `QueueManager`（队列+shuffle+播放顺序） | 降低God Object风险 | 待完成 |
+| 🔴 P0 | 拆分 `player_provider.dart` — 提取 `PlaybackStatsManager`（统计+最近播放+迁移） | 职责分离 | 待完成 |
+| 🔴 P0 | 拆分 `player_provider.dart` — 提取 `UrlResolver`（URL解析+音质+缓冲） | 可测试性提升 | 待完成 |
+| 🔴 P0 | 提取 `SongActions` mixin — 统一 `_playNext`/`_addToQueue`/`_playAt` + toast | 消除5处重复 | 待完成 |
+| 🟡 P1 | 提取 `CoverPlaceholder` 到 `cover_image.dart` | 消除8处重复 | ✅ 已完成 |
+| 🟡 P1 | 提取 `PlayAllHeader` widget | 消除2处重复 | 待完成 |
+| 🟡 P1 | 提取 `ErrorPlaceholder` widget | 消除5处重复 | 待完成 |
+| 🟢 P2 | 统一状态管理 — setState派改用Provider | 降低认知负担 | 待完成 |
+| 🟢 P2 | 拆分 `player_page.dart` — 进度条/控制区/歌词区分离 | 可读性提升 | 待完成 |
+| 🟢 P2 | 拆分 `main_scaffold.dart` — 侧边栏/导航/响应式分离 | 可读性提升 | 待完成 |
