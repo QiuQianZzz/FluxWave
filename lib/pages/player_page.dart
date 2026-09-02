@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:provider/provider.dart';
 
 import '../core/color_readability.dart';
+import '../core/logging/app_log.dart';
 import '../core/navigation/artist_navigation.dart';
 import '../core/lyric/lyric_model.dart';
 import '../core/lyric/lyric_provider.dart';
@@ -123,10 +124,21 @@ class _PlayerPageState extends State<PlayerPage>
   /// 使 tab 栏与迷你播放器可见。
   void _onArtistTap(Song song) {
     final artists = song.artists;
+    AppLog.info(
+      '_onArtistTap: song=${song.name}, artists=${artists.length}, '
+      'ids=[${artists.map((a) => a.id).join(',')}]',
+      tag: 'artist',
+    );
     if (artists.isEmpty) return;
     if (artists.length == 1) {
       if (artists.first.id > 0) {
         _navigateToArtist(artists.first.id, artists.first.name);
+      } else {
+        AppLog.warn(
+          '_onArtistTap: 单歌手 id=0，无法跳转',
+          tag: 'artist',
+          error: {'song': song.name, 'artist': artists.first.name},
+        );
       }
       return;
     }
@@ -139,6 +151,11 @@ class _PlayerPageState extends State<PlayerPage>
       _showArtistPicker(valid);
       return;
     }
+    AppLog.warn(
+      '_onArtistTap: 所有歌手 id 均为 0，无法跳转',
+      tag: 'artist',
+      error: {'song': song.name, 'artists': artists.map((a) => a.name).join('/')},
+    );
     _showArtistPicker(artists);
   }
 

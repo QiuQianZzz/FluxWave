@@ -73,6 +73,37 @@ class Song {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 
+  /// 是否所有歌手 id 均为 0（来源如本地 SQLite 只存了名字）。
+  bool get needsArtistIds =>
+      artists.isNotEmpty && artists.every((a) => a.id == 0);
+
+  /// 批量补全歌手 ID：找出 [needsArtistIds] 的歌曲，通过 [fetchByIds] 拉取
+  /// 完整信息并替换。返回补全后的列表（与原列表等长，仅替换缺失项）。
+  ///
+  /// [fetchByIds] 应等价于 `NeteaseApi.songDetailByIds`，用回调避免循环依赖。
+  static Future<List<Song>> ensureArtistIds(
+    List<Song> songs,
+    Future<List<Song>> Function(List<int> ids) fetchByIds,
+  ) async {
+    final indices = <int>[];
+    for (var i = 0; i < songs.length; i++) {
+      if (songs[i].needsArtistIds) indices.add(i);
+    }
+    if (indices.isEmpty) return songs;
+
+    final ids = indices.map((i) => songs[i].id).toList();
+    final fresh = await fetchByIds(ids);
+    if (fresh.isEmpty) return songs;
+
+    final freshMap = {for (final s in fresh) s.id: s};
+    final result = List<Song>.from(songs);
+    for (final idx in indices) {
+      final updated = freshMap[result[idx].id];
+      if (updated != null) result[idx] = updated;
+    }
+    return result;
+  }
+
   /// 是否 VIP/付费内容。
   ///
   /// `fee` 语义：0=免费、1=VIP、4=购买专辑、8=会员高音质

@@ -79,11 +79,15 @@ class LikedSongsProvider extends ChangeNotifier {
     if (!_loaded) await load();
     final liked = !isLiked(song);
     if (liked) {
+      final artistIdsStr = song.artists.isEmpty
+          ? null
+          : song.artists.map((a) => a.id).join(',');
       await _storage.addLikedSong(
         source: song.source,
         sourceId: '${song.id}',
         name: song.name,
         artist: song.artists.isEmpty ? null : song.artistsLabel,
+        artistIds: artistIdsStr,
         album: song.albumName,
         coverUrl: song.coverUrl,
         durationMs: song.durationMs,

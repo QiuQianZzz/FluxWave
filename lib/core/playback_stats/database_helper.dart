@@ -41,7 +41,7 @@ class DatabaseHelper {
     _testDatabase = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 6,
         onCreate: instance._onCreate,
         onUpgrade: instance._onUpgrade,
       ),
@@ -70,12 +70,15 @@ class DatabaseHelper {
   /// 最近播放列表上限（超出直接清理最旧）。
   static const int maxRecentPlays = 500;
 
+  /// 统一数据迁移目标版本号（与 PlayerProvider 协调递增）。
+  static const int currentMigrationVersion = 1;
+
   Future<Database> _initDatabase() async {
     final dir = await getApplicationSupportDirectory();
     final path = p.join(dir.path, 'playback.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -99,6 +102,34 @@ class DatabaseHelper {
     if (oldVersion < 4) {
       await _createLikedSongTable(db);
     }
+    if (oldVersion < 5) {
+      await _addColumnIfMissing(
+        db,
+        table: 'recent_play',
+        column: 'artist_ids',
+        definition: 'TEXT',
+      );
+      await _addColumnIfMissing(
+        db,
+        table: 'liked_song',
+        column: 'artist_ids',
+        definition: 'TEXT',
+      );
+    }
+    // v5→v6：新建 schema_version 表（旧库首次升级时创建）
+    if (oldVersion < 6) {
+      final hasTable = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'",
+      );
+      if (hasTable.isEmpty) {
+        await db.execute('''
+          CREATE TABLE schema_version (
+            version INTEGER NOT NULL DEFAULT 0
+          )
+        ''');
+        await db.insert('schema_version', {'version': 0});
+      }
+    }
   }
 
   /// 给表补列（幂等）：列已存在则跳过，否则 ALTER TABLE 添加。
@@ -115,7 +146,28 @@ class DatabaseHelper {
     }
   }
 
+  /// 读取统一数据迁移版本号。
+  Future<int> getSchemaVersion() async {
+    final db = await database;
+    final rows = await db.query('schema_version', limit: 1);
+    return (rows.first['version'] as int?) ?? 0;
+  }
+
+  /// 写入统一数据迁移版本号。
+  Future<void> setSchemaVersion(int version) async {
+    final db = await database;
+    await db.update('schema_version', {'version': version});
+  }
+
   Future<void> _onCreate(Database db, int version) async {
+    // 统一数据迁移版本号表（替代队列文件内版本号）
+    await db.execute('''
+      CREATE TABLE schema_version (
+        version INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.insert('schema_version', {'version': 0});
+
     await db.execute('''
       CREATE TABLE playback_stat (
         source        TEXT NOT NULL,
@@ -168,6 +220,7 @@ class DatabaseHelper {
         source_id     TEXT NOT NULL,
         name          TEXT NOT NULL,
         artist        TEXT,
+        artist_ids    TEXT,
         album         TEXT,
         cover_url     TEXT,
         duration_ms   INTEGER DEFAULT 0,
@@ -190,6 +243,7 @@ class DatabaseHelper {
         source_id     TEXT NOT NULL,
         name          TEXT NOT NULL,
         artist        TEXT,
+        artist_ids    TEXT,
         album         TEXT,
         cover_url     TEXT,
         duration_ms   INTEGER DEFAULT 0,
@@ -552,6 +606,7 @@ class DatabaseHelper {
     required String sourceId,
     required String name,
     String? artist,
+    String? artistIds,
     String? album,
     String? coverUrl,
     required int durationMs,
@@ -561,12 +616,13 @@ class DatabaseHelper {
     final db = await database;
     await db.rawInsert('''
       INSERT INTO recent_play (
-        source, source_id, name, artist, album, cover_url, duration_ms,
+        source, source_id, name, artist, artist_ids, album, cover_url, duration_ms,
         fee, played_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source, source_id) DO UPDATE SET
         name = excluded.name,
         artist = excluded.artist,
+        artist_ids = excluded.artist_ids,
         album = excluded.album,
         cover_url = excluded.cover_url,
         duration_ms = excluded.duration_ms,
@@ -577,6 +633,7 @@ class DatabaseHelper {
       sourceId,
       name,
       artist,
+      artistIds,
       album,
       coverUrl,
       durationMs,
@@ -609,6 +666,53 @@ class DatabaseHelper {
     return rows.map(RecentPlay.fromMap).toList();
   }
 
+  /// 迁移：为旧最近播放中 artist_ids 为空的行补全歌手 ID。
+  ///
+  /// [fetchByIds] 与 [Song.ensureArtistIds] 同签名，避免循环依赖。
+  /// 返回补全行数。
+  Future<int> migrateRecentPlayArtistIds(
+    Future<List<Map<String, dynamic>>> Function(List<int> ids) fetchByIds,
+  ) async {
+    final db = await database;
+    final rows = await db.query(
+      'recent_play',
+      where: "artist_ids IS NULL OR artist_ids = ''",
+    );
+    if (rows.isEmpty) return 0;
+    final ids = rows.map((r) {
+      final sourceId = r['source_id'] as String;
+      return int.tryParse(sourceId) ?? 0;
+    }).where((id) => id > 0).toList();
+    if (ids.isEmpty) return 0;
+    final details = await fetchByIds(ids);
+    final idToArtists = <int, String>{};
+    for (final d in details) {
+      final songId = d['id'] as int? ?? 0;
+      final ar = d['ar'] as List? ?? d['artists'] as List? ?? [];
+      final artistIds = ar
+          .whereType<Map>()
+          .map((a) => a['id'] as int? ?? 0)
+          .where((id) => id > 0)
+          .join(',');
+      if (artistIds.isNotEmpty) idToArtists[songId] = artistIds;
+    }
+    var updated = 0;
+    for (final row in rows) {
+      final sourceId = row['source_id'] as String;
+      final songId = int.tryParse(sourceId) ?? 0;
+      final artistIds = idToArtists[songId];
+      if (artistIds == null || artistIds.isEmpty) continue;
+      await db.update(
+        'recent_play',
+        {'artist_ids': artistIds},
+        where: 'source = ? AND source_id = ?',
+        whereArgs: [row['source'], sourceId],
+      );
+      updated++;
+    }
+    return updated;
+  }
+
   /// 收藏一首歌（UPSERT：已收藏则更新时间与快照字段，不产生重复行）。
   ///
   /// [likedAtMs] 供测试注入确定时间；默认取当前时间戳。
@@ -617,6 +721,7 @@ class DatabaseHelper {
     required String sourceId,
     required String name,
     String? artist,
+    String? artistIds,
     String? album,
     String? coverUrl,
     required int durationMs,
@@ -626,12 +731,13 @@ class DatabaseHelper {
     final db = await database;
     await db.rawInsert('''
       INSERT INTO liked_song (
-        source, source_id, name, artist, album, cover_url, duration_ms,
+        source, source_id, name, artist, artist_ids, album, cover_url, duration_ms,
         fee, liked_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source, source_id) DO UPDATE SET
         name = excluded.name,
         artist = excluded.artist,
+        artist_ids = excluded.artist_ids,
         album = excluded.album,
         cover_url = excluded.cover_url,
         duration_ms = excluded.duration_ms,
@@ -642,6 +748,7 @@ class DatabaseHelper {
       sourceId,
       name,
       artist,
+      artistIds,
       album,
       coverUrl,
       durationMs,
@@ -688,6 +795,53 @@ class DatabaseHelper {
       orderBy: 'liked_at DESC, rowid DESC',
     );
     return rows.map(LikedSong.fromMap).toList();
+  }
+
+  /// 迁移：为旧收藏中 artist_ids 为空的行补全歌手 ID。
+  ///
+  /// [fetchByIds] 与 [Song.ensureArtistIds] 同签名，避免循环依赖。
+  /// 返回补全行数。
+  Future<int> migrateLikedSongArtistIds(
+    Future<List<Map<String, dynamic>>> Function(List<int> ids) fetchByIds,
+  ) async {
+    final db = await database;
+    final rows = await db.query(
+      'liked_song',
+      where: "artist_ids IS NULL OR artist_ids = ''",
+    );
+    if (rows.isEmpty) return 0;
+    final ids = rows.map((r) {
+      final sourceId = r['source_id'] as String;
+      return int.tryParse(sourceId) ?? 0;
+    }).where((id) => id > 0).toList();
+    if (ids.isEmpty) return 0;
+    final details = await fetchByIds(ids);
+    final idToArtists = <int, String>{};
+    for (final d in details) {
+      final songId = d['id'] as int? ?? 0;
+      final ar = d['ar'] as List? ?? d['artists'] as List? ?? [];
+      final artistIds = ar
+          .whereType<Map>()
+          .map((a) => a['id'] as int? ?? 0)
+          .where((id) => id > 0)
+          .join(',');
+      if (artistIds.isNotEmpty) idToArtists[songId] = artistIds;
+    }
+    var updated = 0;
+    for (final row in rows) {
+      final sourceId = row['source_id'] as String;
+      final songId = int.tryParse(sourceId) ?? 0;
+      final artistIds = idToArtists[songId];
+      if (artistIds == null || artistIds.isEmpty) continue;
+      await db.update(
+        'liked_song',
+        {'artist_ids': artistIds},
+        where: 'source = ? AND source_id = ?',
+        whereArgs: [row['source'], sourceId],
+      );
+      updated++;
+    }
+    return updated;
   }
 
   /// 收藏总数。

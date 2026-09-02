@@ -121,11 +121,6 @@ class PlayerPlaybackStorage {
   static const String _kStateKey = 'playback_state_v1';
   static const int _kQueueSchemaVersion = 1;
 
-  /// 数据层 schema 版本（与队列文件格式版本解耦）。
-  /// 每次数据迁移递增；启动时比对并执行缺失的迁移步骤。
-  static const String _kDataSchemaKey = 'dataSchemaVersion';
-  static const int currentDataSchemaVersion = 1;
-
   /// 当前队列文件名（不带版本号；格式版本由文件内 `v` 字段声明）。
   static const String _kQueueFileName = 'playback_queue.json';
 
@@ -147,13 +142,6 @@ class PlayerPlaybackStorage {
 
   /// 队列文件是否已存在（迁移短路门控）。
   Future<bool> hasFileQueue() async => _queueFile.exists();
-
-  /// 当前数据层 schema 版本（默认 0：从未迁移过）。
-  int get dataSchemaVersion => _prefs.getInt(_kDataSchemaKey) ?? 0;
-
-  /// 更新数据层 schema 版本号。
-  Future<void> setDataSchemaVersion(int version) =>
-      _prefs.setInt(_kDataSchemaKey, version);
 
   /// 写队列组（大、低频）：空队列直接删文件；否则 temp+rename 原子写。
   Future<void> saveQueue(

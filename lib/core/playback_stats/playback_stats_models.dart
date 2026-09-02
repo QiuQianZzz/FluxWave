@@ -1,5 +1,37 @@
+import '../../core/logging/app_log.dart';
 import '../../models/artist.dart';
 import '../../models/song.dart';
+
+/// 将艺术家名列表与 ID 列表配对为 [ArtistSummary] 列表。
+///
+/// 若 [ids] 为 null 或长度不匹配 [names]，缺失的 ID 填 0（兼容旧数据）。
+List<ArtistSummary> _parseArtists(String? names, String? ids) {
+  if (names == null || names.isEmpty) return const [];
+  final nameList = names.split('/').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  if (nameList.isEmpty) return const [];
+  final idList = ids?.split(',').map((s) => int.tryParse(s.trim()) ?? 0).toList();
+  final artists = List.generate(
+    nameList.length,
+    (i) => ArtistSummary(
+      id: (idList != null && i < idList.length) ? idList[i] : 0,
+      name: nameList[i],
+    ),
+  );
+  // 日志：解析结果
+  final hasZeroId = artists.any((a) => a.id == 0);
+  if (hasZeroId) {
+    AppLog.warn(
+      '_parseArtists: 存在 id=0 的歌手，跳转歌手页将不可用',
+      tag: 'migration',
+      error: {
+        'names': names,
+        'ids': ids,
+        'parsed': artists.map((a) => '${a.id}:${a.name}').join(', '),
+      },
+    );
+  }
+  return artists;
+}
 
 /// 最近播放条目（去重时间线：每首歌一行，最新播放在前）。
 class RecentPlay {
@@ -7,6 +39,7 @@ class RecentPlay {
   final String sourceId;
   final String name;
   final String? artist;
+  final String? artistIds;
   final String? album;
   final String? coverUrl;
   final int durationMs;
@@ -18,6 +51,7 @@ class RecentPlay {
     required this.sourceId,
     required this.name,
     this.artist,
+    this.artistIds,
     this.album,
     this.coverUrl,
     this.durationMs = 0,
@@ -30,6 +64,7 @@ class RecentPlay {
     'source_id': sourceId,
     'name': name,
     'artist': artist,
+    'artist_ids': artistIds,
     'album': album,
     'cover_url': coverUrl,
     'duration_ms': durationMs,
@@ -42,6 +77,7 @@ class RecentPlay {
     sourceId: map['source_id'] as String,
     name: map['name'] as String,
     artist: map['artist'] as String?,
+    artistIds: map['artist_ids'] as String?,
     album: map['album'] as String?,
     coverUrl: map['cover_url'] as String?,
     durationMs: (map['duration_ms'] as int?) ?? 0,
@@ -54,14 +90,7 @@ class RecentPlay {
     source: source,
     id: int.tryParse(sourceId) ?? 0,
     name: name,
-    artists: artist == null
-        ? const []
-        : artist!
-              .split('/')
-              .map((s) => s.trim())
-              .where((s) => s.isNotEmpty)
-              .map((s) => ArtistSummary(id: 0, name: s))
-              .toList(),
+    artists: _parseArtists(artist, artistIds),
     albumName: album,
     coverUrl: coverUrl,
     durationMs: durationMs,
@@ -75,6 +104,7 @@ class LikedSong {
   final String sourceId;
   final String name;
   final String? artist;
+  final String? artistIds;
   final String? album;
   final String? coverUrl;
   final int durationMs;
@@ -86,6 +116,7 @@ class LikedSong {
     required this.sourceId,
     required this.name,
     this.artist,
+    this.artistIds,
     this.album,
     this.coverUrl,
     this.durationMs = 0,
@@ -98,6 +129,7 @@ class LikedSong {
     'source_id': sourceId,
     'name': name,
     'artist': artist,
+    'artist_ids': artistIds,
     'album': album,
     'cover_url': coverUrl,
     'duration_ms': durationMs,
@@ -110,6 +142,7 @@ class LikedSong {
     sourceId: map['source_id'] as String,
     name: map['name'] as String,
     artist: map['artist'] as String?,
+    artistIds: map['artist_ids'] as String?,
     album: map['album'] as String?,
     coverUrl: map['cover_url'] as String?,
     durationMs: (map['duration_ms'] as int?) ?? 0,
@@ -122,14 +155,7 @@ class LikedSong {
     source: source,
     id: int.tryParse(sourceId) ?? 0,
     name: name,
-    artists: artist == null
-        ? const []
-        : artist!
-              .split('/')
-              .map((s) => s.trim())
-              .where((s) => s.isNotEmpty)
-              .map((s) => ArtistSummary(id: 0, name: s))
-              .toList(),
+    artists: _parseArtists(artist, artistIds),
     albumName: album,
     coverUrl: coverUrl,
     durationMs: durationMs,

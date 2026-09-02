@@ -917,31 +917,37 @@ class PlayerProvider extends ChangeNotifier {
     }
   }
 
-  /// 增量数据迁移：读取 [PlayerPlaybackStorage.dataSchemaVersion]，
+  /// 增量数据迁移：读取 [DatabaseHelper.getSchemaVersion]，
   /// 从 stored 到 target-1 逐版本执行，完成后递增版本号。
   ///
   /// 迁移在后台异步执行，不阻塞播放恢复；单步失败不影响后续版本。
   Future<void> _runMigrations() async {
     final storage = this.storage;
     if (storage == null || !netease.apiReady) return;
-    final stored = storage.dataSchemaVersion;
-    final target = PlayerPlaybackStorage.currentDataSchemaVersion;
+    final db = DatabaseHelper.instance;
+    final stored = await db.getSchemaVersion();
+    final target = DatabaseHelper.currentMigrationVersion;
     if (stored >= target) return;
-    AppLog.info('数据迁移：v$stored → v$target', tag: 'player');
+    AppLog.info('数据迁移：v$stored → v$target', tag: 'migration');
     _migrating = true;
+    var allOk = true;
     try {
       for (var v = stored; v < target; v++) {
         try {
           switch (v) {
             case 0:
               await _migrationV1ArtistIds(storage);
+              await _migrationV1LikedSong();
+              await _migrationV1RecentPlay();
             // 未来版本在此追加 case
           }
         } catch (e) {
-          AppLog.error('数据迁移 v${v + 1} 失败', tag: 'player', error: e);
+          allOk = false;
+          AppLog.error('数据迁移 v${v + 1} 失败', tag: 'migration', error: e);
         }
       }
-      await storage.setDataSchemaVersion(target);
+      // 仅全部成功才递增版本号，失败时下次启动重试
+      if (allOk) await db.setSchemaVersion(target);
     } finally {
       _migrating = false;
     }
@@ -958,51 +964,77 @@ class PlayerProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 迁移 v1：补全 liked_song 表中旧数据的歌手 ID。
+  Future<void> _migrationV1LikedSong() async {
+    final count = await _migrationV1TableArtistIds('liked_song');
+    if (count > 0) await liked.reload();
+  }
+
+  /// 迁移 v1：补全 recent_play 表中旧数据的歌手 ID。
+  Future<void> _migrationV1RecentPlay() async {
+    await _migrationV1TableArtistIds('recent_play');
+  }
+
+  /// 迁移 v1 公共逻辑：为指定表中 artist_ids 为空的行补全歌手 ID。
+  Future<int> _migrationV1TableArtistIds(String table) async {
+    final api = netease.api;
+    if (!netease.apiReady) return 0;
+    try {
+      Future<List<Map<String, dynamic>>> fetchByIds(List<int> ids) async {
+        final songs = await api.songDetailByIds(ids);
+        return songs.map((s) => s.toJson()).toList();
+      }
+      final db = DatabaseHelper.instance;
+      final count = table == 'liked_song'
+          ? await db.migrateLikedSongArtistIds(fetchByIds)
+          : await db.migrateRecentPlayArtistIds(fetchByIds);
+      if (count > 0) {
+        AppLog.info('迁移 v1：$table 补全 $count 首', tag: 'migration');
+      }
+      return count;
+    } catch (e) {
+      AppLog.warn('迁移 v1：$table 补全失败', tag: 'migration', error: e);
+      return 0;
+    }
+  }
+
   /// 迁移 v0→v1：为旧队列中 artistId 缺失（id=0）的歌曲补全歌手 ID。
   ///
-  /// 通过 `songDetailByIds` 批量拉取完整曲目信息（含 ar[].id），
-  /// 替换后原子写回队列文件。仅处理 artist 全部 id=0 的歌曲，
-  /// 已有有效 id 的歌曲不动。
+  /// 使用 [Song.ensureArtistIds] 统一补全逻辑，替换后原子写回队列文件。
   Future<void> _migrationV1ArtistIds(PlayerPlaybackStorage storage) async {
     final api = netease.api;
     final snapshot = await storage.load();
-    if (snapshot == null || snapshot.queue.isEmpty) return;
+    if (snapshot == null || snapshot.queue.isEmpty) {
+      AppLog.info('迁移 v1：队列为空，跳过', tag: 'migration');
+      return;
+    }
     final queue = List<Song>.from(snapshot.queue);
-    // 收集需要补全的歌曲下标（所有歌手 id 均为 0）
-    final needBackfill = <int>[];
-    for (var i = 0; i < queue.length; i++) {
-      final song = queue[i];
-      if (song.artists.isNotEmpty &&
-          song.artists.every((a) => a.id == 0)) {
-        needBackfill.add(i);
-      }
-    }
-    if (needBackfill.isEmpty) return;
-    // 批量拉取（每批 500）
-    final ids = needBackfill.map((i) => queue[i].id).toList();
-    final fresh = await api.songDetailByIds(ids);
-    if (fresh.isEmpty) return;
-    // 按 id 建索引，替换原队列中的歌曲
-    final freshMap = {for (final s in fresh) s.id: s};
+    final needBackfill = queue.where((s) => s.needsArtistIds).length;
+    AppLog.info(
+      '迁移 v1：队列 ${queue.length} 首，需补全 $needBackfill 首',
+      tag: 'migration',
+    );
+
+    final updated = await Song.ensureArtistIds(queue, api.songDetailByIds);
+
+    // 仅当有实际替换才写回
     var replaced = 0;
-    var skipped = 0;
-    for (final idx in needBackfill) {
-      final updated = freshMap[queue[idx].id];
-      if (updated != null) {
-        queue[idx] = updated;
-        replaced++;
-      } else {
-        skipped++;
+    for (var i = 0; i < queue.length; i++) {
+      if (queue[i].needsArtistIds && !updated[i].needsArtistIds) replaced++;
+    }
+    AppLog.info('迁移 v1：成功补全 $replaced 首', tag: 'migration');
+    if (replaced == 0) return;
+
+    if (queue.length - replaced > 0) {
+      final skipped = queue.where((s) => s.needsArtistIds).length;
+      if (skipped > 0) {
+        AppLog.warn('迁移 v1：$skipped 首歌已下架，跳过歌手 ID 补全',
+            tag: 'migration');
       }
     }
-    if (skipped > 0) {
-      AppLog.warn('迁移 v1：$skipped 首歌已下架，跳过歌手 ID 补全',
-          tag: 'migration');
-    }
-    if (replaced == 0) return;
-    // 原子写回
+
     await storage.saveQueue(
-      queue,
+      updated,
       snapshot.currentIndex,
       shuffleOrder: snapshot.shuffleOrder,
     );
@@ -2263,11 +2295,20 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> _writeRecentPlay(Song song, int nowMs) async {
     try {
+      final artistIdsStr = song.artists.isEmpty
+          ? null
+          : song.artists.map((a) => a.id).join(',');
+      AppLog.info(
+        '_writeRecentPlay: ${song.name}, artistIds=$artistIdsStr, '
+        'artists=[${song.artists.map((a) => '${a.id}:${a.name}').join(',')}]',
+        tag: 'migration',
+      );
       await DatabaseHelper.instance.recordRecentPlay(
         source: song.source,
         sourceId: song.id.toString(),
         name: song.name,
         artist: song.artists.isNotEmpty ? song.artistsLabel : null,
+        artistIds: artistIdsStr,
         album: song.albumName,
         coverUrl: song.coverUrl,
         durationMs: song.durationMs,
@@ -2275,7 +2316,6 @@ class PlayerProvider extends ChangeNotifier {
         playedAtMs: nowMs,
       );
     } catch (e) {
-      // 静默失败，不影响播放
       AppLog.warn('记录最近播放失败', tag: 'player', error: e);
     }
   }

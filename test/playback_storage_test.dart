@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:fluxwave/core/player/playback_migration.dart';
 import 'package:fluxwave/core/player/playback_storage.dart';
+import 'package:fluxwave/core/playback_stats/database_helper.dart';
 import 'package:fluxwave/models/artist.dart';
 import 'package:fluxwave/models/song.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -335,21 +336,7 @@ void main() {
     expect(await storage.load(), isNull);
   });
 
-  test('dataSchemaVersion 默认为 0', () async {
-    final storage = await makeStorage();
-    expect(storage.dataSchemaVersion, 0);
-  });
-
-  test('setDataSchemaVersion 持久化后可读回', () async {
-    final storage = await makeStorage();
-    await storage.setDataSchemaVersion(2);
-    expect(storage.dataSchemaVersion, 2);
-    // 新实例也能读到
-    final storage2 = await makeStorage();
-    expect(storage2.dataSchemaVersion, 2);
-  });
-
-  test('currentDataSchemaVersion 常量 >= 1', () {
-    expect(PlayerPlaybackStorage.currentDataSchemaVersion, greaterThanOrEqualTo(1));
+  test('currentMigrationVersion 常量 >= 1', () {
+    expect(DatabaseHelper.currentMigrationVersion, greaterThanOrEqualTo(1));
   });
 }
