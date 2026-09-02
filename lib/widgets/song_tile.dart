@@ -128,9 +128,9 @@ class SongTile extends StatelessWidget {
                     child: cover != null && cover.isNotEmpty
                         ? CoverImage(
                             url: cover,
-                            placeholder: _coverFallback(cs),
+                            placeholder: const CoverPlaceholder(size: 24),
                           )
-                        : _coverFallback(cs),
+                        : const CoverPlaceholder(size: 24),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -169,16 +169,6 @@ class SongTile extends StatelessWidget {
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHigh,
-      child: Icon(
-        Icons.music_note_rounded,
-        size: 24,
-        color: cs.onSurfaceVariant,
-      ),
-    );
-  }
 }
 
 enum _SongAction { playNext, addToQueue, removeFavorite }

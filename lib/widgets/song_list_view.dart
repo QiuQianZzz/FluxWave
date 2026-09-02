@@ -14,7 +14,6 @@ class SongListView extends StatelessWidget {
   final String emptyText;
   final String errorPrefix;
   final VoidCallback? onRetry;
-  final VoidCallback? onPlayAll;
   final Widget? header;
   final void Function(int index) onPlayAt;
   final void Function(Song song) onPlayNext;
@@ -28,7 +27,6 @@ class SongListView extends StatelessWidget {
     this.emptyText = '还没有歌曲',
     this.errorPrefix = '加载失败',
     this.onRetry,
-    this.onPlayAll,
     this.header,
     required this.onPlayAt,
     required this.onPlayNext,

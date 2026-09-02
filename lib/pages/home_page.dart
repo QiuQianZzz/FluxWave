@@ -365,8 +365,19 @@ class _PlaylistCard extends StatelessWidget {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: (url != null && url.isNotEmpty)
-                      ? CoverImage(url: url, placeholder: _coverFallback(cs))
-                      : _coverFallback(cs),
+                      ? CoverImage(
+                          url: url,
+                          placeholder: CoverPlaceholder(
+                            borderRadius: 14,
+                            borderColor: cs.outlineVariant.withValues(alpha: 0.4),
+                            iconColor: cs.onSurfaceVariant.withValues(alpha: 0.4),
+                          ),
+                        )
+                      : CoverPlaceholder(
+                          borderRadius: 14,
+                          borderColor: cs.outlineVariant.withValues(alpha: 0.4),
+                          iconColor: cs.onSurfaceVariant.withValues(alpha: 0.4),
+                        ),
                 ),
               ),
             ),
@@ -394,20 +405,6 @@ class _PlaylistCard extends StatelessWidget {
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) => Container(
-    decoration: BoxDecoration(
-      color: cs.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.4)),
-    ),
-    child: Center(
-      child: Icon(
-        Icons.music_note_rounded,
-        size: 40,
-        color: cs.onSurfaceVariant.withValues(alpha: 0.4),
-      ),
-    ),
-  );
 }
 
 /// 让鼠标也参与拖拽滚动，桌面端下拉即可触发 [RefreshIndicator]。

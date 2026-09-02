@@ -437,9 +437,15 @@ class _QueueTile extends StatelessWidget {
                           song.coverSmall != null && song.coverSmall!.isNotEmpty
                           ? CoverImage(
                               url: song.coverSmall!,
-                              placeholder: _coverFallback(cs),
+                              placeholder: CoverPlaceholder(
+                                size: 20,
+                                backgroundColor: cs.surfaceContainerHighest,
+                              ),
                             )
-                          : _coverFallback(cs),
+                          : CoverPlaceholder(
+                              size: 20,
+                              backgroundColor: cs.surfaceContainerHighest,
+                            ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -510,16 +516,6 @@ class _QueueTile extends StatelessWidget {
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHighest,
-      child: Icon(
-        Icons.music_note_rounded,
-        color: cs.onSurfaceVariant,
-        size: 20,
-      ),
-    );
-  }
 }
 
 /// 标题区右侧的「当前播放位置」定位按钮：显示第 N 首，点击滚动回当前项。

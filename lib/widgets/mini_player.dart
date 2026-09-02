@@ -418,21 +418,17 @@ class _MiniPlayerState extends State<MiniPlayer>
                 url: cover,
                 songKey: songKey,
                 reloadToken: reloadToken,
-                placeholder: _coverFallback(cs),
+                placeholder: CoverPlaceholder(
+                  size: 24,
+                  backgroundColor: cs.surfaceContainerHighest,
+                ),
               )
-            : _coverFallback(cs),
+            : CoverPlaceholder(
+                size: 24,
+                backgroundColor: cs.surfaceContainerHighest,
+              ),
       ),
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHighest,
-      child: Icon(
-        Icons.music_note_rounded,
-        color: cs.onSurfaceVariant,
-        size: 24,
-      ),
-    );
-  }
 }

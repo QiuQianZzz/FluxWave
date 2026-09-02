@@ -129,7 +129,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       emptyText: '专辑里还没有歌曲',
       errorPrefix: '加载失败',
       onRetry: _load,
-      onPlayAll: _playAll,
       header: _meta != null
           ? _AlbumHeader(
               meta: _meta!,
@@ -175,8 +174,11 @@ class _AlbumHeader extends StatelessWidget {
               width: 96,
               height: 96,
               child: (url != null && url.isNotEmpty)
-                  ? CoverImage(url: url, placeholder: _coverFallback(cs))
-                  : _coverFallback(cs),
+                  ? CoverImage(
+                      url: url,
+                      placeholder: const CoverPlaceholder(icon: Icons.album_rounded),
+                    )
+                  : const CoverPlaceholder(icon: Icons.album_rounded),
             ),
           ),
           const SizedBox(width: 16),
@@ -242,10 +244,4 @@ class _AlbumHeader extends StatelessWidget {
     return parts.join(' · ');
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHigh,
-      child: Icon(Icons.album_rounded, size: 40, color: cs.onSurfaceVariant),
-    );
-  }
 }

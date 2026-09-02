@@ -516,8 +516,11 @@ class _PlaylistCard extends StatelessWidget {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: (url != null && url.isNotEmpty)
-                      ? CoverImage(url: url, placeholder: _coverFallback(cs))
-                      : _coverFallback(cs),
+                      ? CoverImage(
+                          url: url,
+                          placeholder: const CoverPlaceholder(icon: Icons.queue_music_rounded),
+                        )
+                      : const CoverPlaceholder(icon: Icons.queue_music_rounded),
                 ),
               ),
             ),
@@ -555,16 +558,6 @@ class _PlaylistCard extends StatelessWidget {
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHigh,
-      child: Icon(
-        Icons.queue_music_rounded,
-        size: 40,
-        color: cs.onSurfaceVariant,
-      ),
-    );
-  }
 }
 
 /// 行间细分隔线（喜欢的置顶行与其余行之间均使用）。

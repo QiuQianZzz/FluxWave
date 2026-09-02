@@ -227,3 +227,53 @@ class CoverImageCache {
     }
   }
 }
+
+/// 封面占位组件：统一处理 8 处重复的 `_coverFallback`。
+///
+/// 用法：`CoverPlaceholder(size: 40)` 或
+/// `CoverPlaceholder(icon: Icons.album_rounded, backgroundColor: cs.surfaceContainerHighest)`。
+class CoverPlaceholder extends StatelessWidget {
+  final double size;
+  final IconData icon;
+  final Color? backgroundColor;
+  final Color? iconColor;
+  final double? borderRadius;
+  final Color? borderColor;
+
+  const CoverPlaceholder({
+    super.key,
+    this.size = 40,
+    this.icon = Icons.music_note_rounded,
+    this.backgroundColor,
+    this.iconColor,
+    this.borderRadius,
+    this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bg = backgroundColor ?? cs.surfaceContainerHigh;
+    final fg = iconColor ?? cs.onSurfaceVariant;
+
+    if (borderRadius != null || borderColor != null) {
+      return Container(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: borderRadius != null
+              ? BorderRadius.circular(borderRadius!)
+              : null,
+          border: borderColor != null
+              ? Border.all(color: borderColor!)
+              : null,
+        ),
+        child: Center(child: Icon(icon, size: size, color: fg)),
+      );
+    }
+
+    return Container(
+      color: bg,
+      child: Center(child: Icon(icon, size: size, color: fg)),
+    );
+  }
+}

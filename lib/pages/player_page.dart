@@ -715,23 +715,19 @@ class _PlayerPageState extends State<PlayerPage>
                 songKey: songKey,
                 // 断网加载失败后，随播放自愈成功（contentTick+1）重试封面。
                 reloadToken: context.read<PlayerProvider>().contentTick,
-                placeholder: _coverFallback(cs),
+                placeholder: CoverPlaceholder(
+                  size: 72,
+                  backgroundColor: cs.surfaceContainerHighest,
+                ),
               )
-            : _coverFallback(cs),
+            : CoverPlaceholder(
+                size: 72,
+                backgroundColor: cs.surfaceContainerHighest,
+              ),
       ),
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHighest,
-      child: Icon(
-        Icons.music_note_rounded,
-        size: 72,
-        color: cs.onSurfaceVariant,
-      ),
-    );
-  }
 
   Widget _buildControls(ColorScheme cs, PlayerProvider player) {
     final liked = context.watch<LikedSongsProvider>();

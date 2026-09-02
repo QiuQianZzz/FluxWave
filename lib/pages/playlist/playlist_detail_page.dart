@@ -211,7 +211,6 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       emptyText: '歌单里还没有歌曲',
       errorPrefix: '加载失败',
       onRetry: _load,
-      onPlayAll: _playAll,
       header: meta != null
           ? _PlaylistHeader(
               meta: meta,
@@ -259,8 +258,11 @@ class _PlaylistHeader extends StatelessWidget {
               width: 96,
               height: 96,
               child: (url != null && url.isNotEmpty)
-                  ? CoverImage(url: url, placeholder: _coverFallback(cs))
-                  : _coverFallback(cs),
+                  ? CoverImage(
+                      url: url,
+                      placeholder: const CoverPlaceholder(icon: Icons.queue_music_rounded),
+                    )
+                  : const CoverPlaceholder(icon: Icons.queue_music_rounded),
             ),
           ),
           const SizedBox(width: 16),
@@ -321,14 +323,4 @@ class _PlaylistHeader extends StatelessWidget {
     );
   }
 
-  Widget _coverFallback(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHigh,
-      child: Icon(
-        Icons.queue_music_rounded,
-        size: 40,
-        color: cs.onSurfaceVariant,
-      ),
-    );
-  }
 }
