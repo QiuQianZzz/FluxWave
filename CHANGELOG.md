@@ -8,6 +8,28 @@
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-09-03
+
+### 新增
+
+- 专辑详情页面，支持拉取专辑元数据和曲目列表，可从歌手详情页点击专辑进入
+- 歌手ID字段存储与自动补全功能，为Song模型新增`artist_ids`字段
+- 数据迁移系统重构，统一使用数据库schema版本管理
+
+### 优化
+
+- 提取通用歌曲列表组件`SongListView`，复用专辑和歌单详情页代码
+- 提取`CoverPlaceholder`组件，统一替换所有页面的占位图逻辑
+- 小窗模式布局自适应，导航栏、迷你播放器、封面尺寸等根据窗口大小动态调整
+
+### 修复
+
+- 修复小米澎湃系统（HyperOS）小窗模式下页面内容不可见的问题
+  - 根因：澎湃系统返回了错误的WindowInsets值，导致MediaQuery.padding异常（top从38变为640）
+  - 方案：在MaterialApp级别全局修正异常的padding值
+  - 参考：https://github.com/flutter/flutter/issues/161086
+- 修复收藏表和最近播放表中歌手ID缺失的问题，启动时自动迁移补全
+
 ## [v0.6.0] - 2026-09-02
 
 ### 新增
@@ -182,7 +204,8 @@
 
 ---
 
-[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.1...HEAD
+[v0.6.1]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.6...v0.6.0
 [v0.5.6]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.5...v0.5.6
 [v0.5.5]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.4...v0.5.5
