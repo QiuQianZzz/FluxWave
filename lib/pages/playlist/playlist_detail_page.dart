@@ -13,8 +13,7 @@ import '../../providers/netease_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/cover_image.dart';
-import '../../widgets/page_scroll_view.dart';
-import '../../widgets/song_tile.dart';
+import '../../widgets/song_list_view.dart';
 
 /// 歌单详情页（只读浏览；本期不做红心/订阅/加删曲写操作）。
 ///
@@ -195,89 +194,36 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(
-        // 名称已由头部（封面旁 [_PlaylistHeader]）展示，标题栏不再重复。
         title: const Text('歌单详情'),
       ),
-      body: SafeArea(child: _buildBody(theme, cs)),
+      body: SafeArea(child: _buildBody()),
     );
   }
 
-  Widget _buildBody(ThemeData theme, ColorScheme cs) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off_rounded, size: 56, color: cs.outlineVariant),
-            const SizedBox(height: 16),
-            Text(
-              '加载失败：$_error',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              onPressed: _load,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('重试'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (_tracks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.music_off_rounded, size: 56, color: cs.outlineVariant),
-            const SizedBox(height: 16),
-            Text('歌单里还没有歌曲', style: theme.textTheme.bodyMedium),
-          ],
-        ),
-      );
-    }
+  Widget _buildBody() {
     final meta = _meta;
-    // 歌单可能很大（接口一次可取 ~10 万首），改 lazy 构建：header 随列表
-    // 滚动（SliverToBoxAdapter），歌曲主体用 SliverList.builder 惰性建房。
-    return PageScrollView(
-      slivers: [
-        if (meta != null)
-          SliverToBoxAdapter(
-            child: _PlaylistHeader(
+    return SongListView(
+      tracks: _tracks,
+      loading: _loading,
+      error: _error,
+      emptyText: '歌单里还没有歌曲',
+      errorPrefix: '加载失败',
+      onRetry: _load,
+      onPlayAll: _playAll,
+      header: meta != null
+          ? _PlaylistHeader(
               meta: meta,
               trackCount: _tracks.length,
               isLiked: _isLikedPlaylist(meta),
               onPlayAll: _playAll,
               onShufflePlay: _playShuffled,
-            ),
-          ),
-        const SliverToBoxAdapter(child: SizedBox(height: 8)),
-        SliverPadding(
-          padding: const EdgeInsets.only(bottom: 32),
-          sliver: SliverFixedExtentList(
-            // 行高恒定 → 滚动偏移精确；首帧只构建可视区 + cacheExtent。
-            itemExtent: SongTile.kTileExtent,
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => SongTile(
-                song: _tracks[i],
-                index: i,
-                onTap: () => _playAt(i),
-                onPlayNext: () => _playNext(_tracks[i]),
-                onAddToQueue: () => _addToQueue(_tracks[i]),
-              ),
-              childCount: _tracks.length,
-            ),
-          ),
-        ),
-      ],
+            )
+          : null,
+      onPlayAt: _playAt,
+      onPlayNext: _playNext,
+      onAddToQueue: _addToQueue,
     );
   }
 }

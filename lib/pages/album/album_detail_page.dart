@@ -11,8 +11,7 @@ import '../../providers/netease_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/cover_image.dart';
-import '../../widgets/page_scroll_view.dart';
-import '../../widgets/song_tile.dart';
+import '../../widgets/song_list_view.dart';
 
 /// 专辑详情页（只读浏览）。
 ///
@@ -116,80 +115,32 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text(widget.albumName ?? '专辑详情')),
-      body: SafeArea(child: _buildBody(theme, cs)),
+      body: SafeArea(child: _buildBody()),
     );
   }
 
-  Widget _buildBody(ThemeData theme, ColorScheme cs) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off_rounded, size: 56, color: cs.outlineVariant),
-            const SizedBox(height: 16),
-            Text(
-              '加载失败：$_error',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              onPressed: _load,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('重试'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (_tracks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.album_rounded, size: 56, color: cs.outlineVariant),
-            const SizedBox(height: 16),
-            Text('专辑里还没有歌曲', style: theme.textTheme.bodyMedium),
-          ],
-        ),
-      );
-    }
-    return PageScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: _AlbumHeader(
-            meta: _meta,
-            trackCount: _tracks.length,
-            onPlayAll: _playAll,
-            onArtistTap: _navigateToArtist,
-          ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 8)),
-        SliverPadding(
-          padding: const EdgeInsets.only(bottom: 32),
-          sliver: SliverFixedExtentList(
-            itemExtent: SongTile.kTileExtent,
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => SongTile(
-                song: _tracks[i],
-                index: i,
-                onTap: () => _playAt(i),
-                onPlayNext: () => _playNext(_tracks[i]),
-                onAddToQueue: () => _addToQueue(_tracks[i]),
-              ),
-              childCount: _tracks.length,
-            ),
-          ),
-        ),
-      ],
+  Widget _buildBody() {
+    return SongListView(
+      tracks: _tracks,
+      loading: _loading,
+      error: _error,
+      emptyText: '专辑里还没有歌曲',
+      errorPrefix: '加载失败',
+      onRetry: _load,
+      onPlayAll: _playAll,
+      header: _meta != null
+          ? _AlbumHeader(
+              meta: _meta!,
+              trackCount: _tracks.length,
+              onPlayAll: _playAll,
+              onArtistTap: _navigateToArtist,
+            )
+          : null,
+      onPlayAt: _playAt,
+      onPlayNext: _playNext,
+      onAddToQueue: _addToQueue,
     );
   }
 }
