@@ -58,14 +58,18 @@ class TabAwarePageRoute<T> extends MaterialPageRoute<T> {
     final ctx = subtreeContext;
     if (ctx == null) return false;
     final tab = ctx.findAncestorWidgetOfExactType<TabNavigator>();
-    if (tab != null && !tab.enabled) return false;
-    try {
-      final playerOverlay = ctx.read<PlayerOverlayState>();
-      if (playerOverlay.showPlayer) return false;
-    } catch (_) {
-      AppLog.debug('popGestureEnabled Provider lookup failed', tag: 'nav');
-      return false;
+    if (tab != null) {
+      // Tab 内路由：受播放页状态约束
+      if (!tab.enabled) return false;
+      try {
+        final playerOverlay = ctx.read<PlayerOverlayState>();
+        if (playerOverlay.showPlayer) return false;
+      } catch (_) {
+        AppLog.debug('popGestureEnabled Provider lookup failed', tag: 'nav');
+        return false;
+      }
     }
+    // 非 tab 路由（pushGlobal 的登录页等）：不受播放页影响，正常允许预测性返回
     return super.popGestureEnabled;
   }
 }
