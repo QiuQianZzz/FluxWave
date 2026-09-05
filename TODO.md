@@ -377,28 +377,28 @@ void _onPlayerNavigateToArtist(int id, String name) {
 
 | 阶段 | 任务 | 优先级 | 预估工作量 | 依赖 |
 |------|------|--------|-----------|------|
-| Phase 1a | PlayerPage 改为叠加层（最小可用） | 🔴 P0 | 2-3h | 无 |
-| Phase 1b | 清理 isPlayerOpen 传递链 | 🔴 P0 | 1h | Phase 1a |
-| Phase 1c | 移除 TabNavigator 中的条件渲染逻辑 | 🔴 P0 | 0.5h | Phase 1b |
-| Phase 2a | HomePage 改为状态机详情管理 | 🔴 P0 | 2-3h | Phase 1 |
-| Phase 2b | ProfilePage 改为状态机 | 🟡 P1 | 2h | Phase 2a |
-| Phase 2c | SearchPage 改为状态机 | 🟡 P1 | 1h | Phase 2a |
-| Phase 2d | 删除 TabNavigator 文件 | 🟡 P1 | 0.5h | Phase 2a-c |
-| Phase 3 | 消除静态回调 | 🟡 P1 | 2h | Phase 1a |
-| Phase 4 | 统一导航入口 | 🟢 P2 | 2h | Phase 2 |
-| Phase 5 | 增强返回手势动画 | 🟢 P2 | 3-4h | Phase 2 |
+| Phase 1a | PlayerPage 改为叠加层（最小可用） | 🔴 P0 | 2-3h | 无 | ✅ 已完成 |
+| Phase 1b | 清理 isPlayerOpen 传递链 | 🔴 P0 | 1h | Phase 1a | ✅ 已完成 |
+| Phase 1c | 移除 TabNavigator 中的条件渲染逻辑 | 🔴 P0 | 0.5h | Phase 1b | ✅ 已完成 |
+| Phase 2a | HomePage 改为状态机详情管理 | 🔴 P0 | 2-3h | Phase 1 | 待完成 |
+| Phase 2b | ProfilePage 改为状态机 | 🟡 P1 | 2h | Phase 2a | 待完成 |
+| Phase 2c | SearchPage 改为状态机 | 🟡 P1 | 1h | Phase 2a | 待完成 |
+| Phase 2d | 删除 TabNavigator 文件 | 🟡 P1 | 0.5h | Phase 2a-c | 待完成 |
+| Phase 3 | 消除静态回调 | 🟡 P1 | 2h | Phase 1a | 待完成 |
+| Phase 4 | 统一导航入口 | 🟢 P2 | 2h | Phase 2 | 部分完成（about_section, log_list_page, main_scaffold 已统一为 AppNav.push/route） |
+| Phase 5 | 增强返回手势动画 | 🟢 P2 | 3-4h | Phase 2 | 待完成 |
 
 ### 五、验证清单
 
 每个阶段完成后需验证：
 
-- [ ] Android 真机：播放页打开时返回手势能关闭播放页
-- [ ] Android 真机：播放页打开 + 歌单详情页打开时，返回手势只关闭播放页
-- [ ] Android 真机：播放页关闭后，返回手势能关闭歌单详情页
-- [ ] Android 真机：预测性返回手势动画正常
-- [ ] Tab 切换后返回手势作用于正确的 Tab
-- [ ] 从播放页点击歌手/专辑能正确跳转
-- [ ] 非活跃 Tab 的返回手势不干扰当前 Tab
-- [ ] Windows 桌面模式下所有导航正常
-- [ ] 热重载后导航状态保持
-- [ ] 进程恢复后导航状态保持
+- [x] Android 真机：播放页打开时返回手势能关闭播放页
+- [x] Android 真机：播放页打开 + 歌单详情页打开时，返回手势只关闭播放页
+- [x] Android 真机：播放页关闭后，返回手势能关闭歌单详情页
+- [x] Android 真机：预测性返回手势动画正常
+- [x] Tab 切换后返回手势作用于正确的 Tab
+- [x] 从播放页点击歌手/专辑能正确跳转
+- [ ] 非活跃 Tab 的返回手势不干扰当前 Tab（待验证）
+- [ ] Windows 桌面模式下所有导航正常（待验证）
+- [ ] 热重载后导航状态保持（待验证）
+- [ ] 进程恢复后导航状态保持（待验证）
