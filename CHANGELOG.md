@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [v0.6.2] - 2026-09-06
+
+### 优化
+
+- 播放页滑入/滑出动画改为底部上滑，关闭时反向滑出
+
+### 修复
+
+- 修复 Android 手势返回无法关闭播放页、直接退出应用的问题
+- 修复打开歌单详情页后再打开播放页，手势返回会先关闭歌单而非播放页的问题
+
 ## [v0.6.1] - 2026-09-03
 
 ### 新增
@@ -204,7 +215,8 @@
 
 ---
 
-[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.2...HEAD
+[v0.6.2]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.1...v0.6.2
 [v0.6.1]: https://github.com/QiuQianZzz/FluxWave/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.6...v0.6.0
 [v0.5.6]: https://github.com/QiuQianZzz/FluxWave/compare/v0.5.5...v0.5.6
