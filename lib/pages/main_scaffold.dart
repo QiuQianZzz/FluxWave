@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../constants/nav_thresholds.dart';
 import '../core/navigation/album_navigation.dart';
+import '../core/navigation/app_nav.dart';
 import '../core/navigation/artist_navigation.dart';
 import '../core/platform_utils.dart';
 import '../core/update_service.dart';
@@ -343,8 +344,8 @@ class _MainScaffoldState extends State<MainScaffold>
     if (tabNav == null) return;
 
     final routeName = 'artist/$id';
-    final page = MaterialPageRoute(
-      builder: (_) => ArtistDetailPage(artistId: id, artistName: name),
+    final page = AppNav.route<dynamic>(
+      ArtistDetailPage(artistId: id, artistName: name),
       settings: RouteSettings(name: routeName),
     );
 
@@ -366,8 +367,8 @@ class _MainScaffoldState extends State<MainScaffold>
     if (tabNav == null) return;
 
     final routeName = 'album/$id';
-    final page = MaterialPageRoute(
-      builder: (_) => AlbumDetailPage(albumId: id, albumName: name),
+    final page = AppNav.route<dynamic>(
+      AlbumDetailPage(albumId: id, albumName: name),
       settings: RouteSettings(name: routeName),
     );
     tabNav.push(page);

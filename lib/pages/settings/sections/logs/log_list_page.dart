@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/logging/app_crash.dart';
 import '../../../../core/logging/app_log.dart';
 import '../../../../core/logging/log_export.dart';
+import '../../../../core/navigation/app_nav.dart';
 import '../../../../core/platform_utils.dart';
 import '../../../../widgets/app_toast.dart';
 import '../../../../widgets/page_scroll_view.dart';
@@ -106,10 +107,9 @@ class _LogListPageState extends State<LogListPage> {
       _toggleSelection(f);
       return;
     }
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => LogDetailPage(file: f, kind: widget.kind),
-      ),
+    await AppNav.push(
+      context,
+      LogDetailPage(file: f, kind: widget.kind),
     );
     _reload(); // 详情页可能删除该文件，返回后刷新
   }

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/app_build_info.dart';
 import '../../../constants/app_links.dart';
 import '../../../core/contributor_service.dart';
+import '../../../core/navigation/app_nav.dart';
 import '../../../core/update_service.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../widgets/app_toast.dart';
@@ -224,9 +225,7 @@ class _LogEntryTile extends StatelessWidget {
       leading: Icon(icon),
       title: Text(title),
       trailing: const Icon(Icons.chevron_right_rounded),
-      onTap: () => Navigator.of(
-        context,
-      ).push(MaterialPageRoute(builder: (_) => LogListPage(kind: kind))),
+      onTap: () => AppNav.push(context, LogListPage(kind: kind)),
     );
   }
 }

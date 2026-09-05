@@ -57,9 +57,8 @@ class _TabNavigatorState extends State<TabNavigator> {
   Widget build(BuildContext context) {
     final playerOverlay = context.watch<PlayerOverlayState>();
     return PopScope<void>(
-      // 播放页打开时恒为 false（拦截返回手势以关闭播放页）；
-      // 否则由嵌套 Navigator 栈深决定。
-      canPop: !widget.enabled || (!playerOverlay.showPlayer && _canPop),
+      // 优先级：非活动 tab 放行 > 播放页打开拦截 > 栈深决定。
+      canPop: !widget.enabled ? true : (playerOverlay.showPlayer ? false : _canPop),
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _onPop();
