@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../core/navigation/player_overlay_state.dart';
 import '../../core/platform_utils.dart';
 import '../../widgets/collapsing_title.dart';
 import '../../widgets/page_scroll_view.dart';
@@ -76,7 +78,12 @@ class _SettingsPageState extends State<SettingsPage>
     return PopScope<Object?>(
       canPop: _selected == null,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _back();
+        if (didPop) return;
+        // 播放页打开时，由 TabNavigator 的 PopScope 统一处理返回手势，
+        // 这里不执行 _back()，避免同时关闭设置详情和播放页。
+        final playerOverlay = context.read<PlayerOverlayState>();
+        if (playerOverlay.showPlayer) return;
+        _back();
       },
       child: _isCompact ? _buildCompact() : _buildExtended(),
     );

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/song.dart';
-import '../pages/player_page.dart';
 import '../providers/player_provider.dart';
 import '../providers/settings_provider.dart';
 import 'cover_image.dart';
@@ -20,7 +19,10 @@ import 'queue_sheet.dart';
 /// 那一块滑动，目标歌曲的封面与信息从侧边进入；松手过阈值后平滑归正并完成
 /// 切换。窄屏不显示上一曲/下一曲按钮；宽屏保留按钮（滑动同样可用）。
 class MiniPlayer extends StatefulWidget {
-  const MiniPlayer({super.key});
+  /// 打开全屏播放页的回调。
+  final VoidCallback? onOpenPlayer;
+
+  const MiniPlayer({super.key, this.onOpenPlayer});
 
   @override
   State<MiniPlayer> createState() => _MiniPlayerState();
@@ -160,7 +162,7 @@ class _MiniPlayerState extends State<MiniPlayer>
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
       child: GestureDetector(
-        onTap: () => _openPlayer(context),
+        onTap: () => widget.onOpenPlayer?.call(),
         onHorizontalDragStart: (_) => _onHorizontalDragStart(),
         onHorizontalDragUpdate: _onHorizontalDragUpdate,
         onHorizontalDragEnd: _onHorizontalDragEnd,
@@ -352,24 +354,6 @@ class _MiniPlayerState extends State<MiniPlayer>
           ),
         ),
       ],
-    );
-  }
-
-  /// 打开全屏播放页：从底部滑入；返回时反向滑出（向下方收起）。
-  static void _openPlayer(BuildContext context) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 320),
-        reverseTransitionDuration: const Duration(milliseconds: 240),
-        pageBuilder: (_, _, _) => const PlayerPage(),
-        transitionsBuilder: (_, animation, _, child) {
-          final offset = Tween<Offset>(
-            begin: const Offset(0, 1),
-            end: Offset.zero,
-          ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(animation);
-          return SlideTransition(position: offset, child: child);
-        },
-      ),
     );
   }
 

@@ -45,7 +45,10 @@ const kWideControlsWidth = 264.0;
 /// 沉浸式，集中展示：大封面 / 歌名 / 歌手 / 试听提示 / 带波浪的进度条 /
 /// 上一曲·播放暂停·下一曲 / 当前音质。内容整体垂直居中，超屏时可滚动。
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key});
+  /// 关闭回调。由父级（MainScaffold）传入，用于关闭播放页叠加层。
+  final VoidCallback? onClose;
+
+  const PlayerPage({super.key, this.onClose});
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -310,7 +313,7 @@ class _PlayerPageState extends State<PlayerPage>
                           visualDensity: VisualDensity.compact,
                           splashRadius: 14,
                           icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                          onPressed: () => Navigator.of(context).pop(),
+                          onPressed: () => widget.onClose?.call(),
                           color: cs.onSurfaceVariant,
                         ),
                         const Spacer(),

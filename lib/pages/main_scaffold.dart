@@ -24,7 +24,9 @@ import 'home_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
 import 'settings/settings_page.dart';
-import 'tab_navigator.dart';
+import '../core/navigation/player_overlay_state.dart';
+import '../pages/player_page.dart';
+import '../pages/tab_navigator.dart';
 
 const _kLogTag = '[TOAST]';
 
@@ -39,11 +41,23 @@ class MainScaffold extends StatefulWidget {
   State<MainScaffold> createState() => _MainScaffoldState();
 }
 
-class _MainScaffoldState extends State<MainScaffold> {
+class _MainScaffoldState extends State<MainScaffold>
+    with TickerProviderStateMixin {
   int _currentIndex = 0;
   bool _sidebarExpanded = true;
   bool _settingsDetailVisible = false;
   bool _profileDetailVisible = false;
+  bool _showPlayer = false;
+
+  /// 播放页叠加层状态（供嵌套 Navigator 内的 PopScope 读取）。
+  final _playerOverlay = PlayerOverlayState();
+
+  /// 播放页滑入/滑出动画控制器。
+  late final AnimationController _playerAnimCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 320),
+    reverseDuration: const Duration(milliseconds: 240),
+  );
 
   /// 每个 tab 的栈顶歌手路由 name（如 'artist/123'），null 表示该 tab 栈顶不是歌手页。
   /// 用于去重：避免从播放页多次点击同一歌手时重复 push。
@@ -127,6 +141,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     // 设置静态回调（仅一次）
     ArtistNavigation.onNavigateToArtist = _navigateToArtistFromPlayer;
     AlbumNavigation.onNavigateToAlbum = _navigateToAlbumFromPlayer;
+    _playerOverlay.setCloseCallback(_closePlayer);
     final player = context.read<PlayerProvider>();
     if (_playerRef != player) {
       _playerRef?.removeListener(_onPlayerChanged);
@@ -146,9 +161,11 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   void dispose() {
+    _playerOverlay.dispose();
     _playerRef?.removeListener(_onPlayerChanged);
     _playerRef = null;
     _toastTimer?.cancel();
+    _playerAnimCtrl.dispose();
     // 避免 MainScaffold 重建后回调持有过期的 State 引用。
     ArtistNavigation.onNavigateToArtist = null;
     AlbumNavigation.onNavigateToAlbum = null;
@@ -301,12 +318,26 @@ class _MainScaffoldState extends State<MainScaffold> {
     setState(() => _currentIndex = index);
   }
 
-  /// 从播放页跳转歌手页：pop 播放页（根 Navigator）→ push 歌手页到当前 tab Navigator。
+  void _openPlayer() {
+    setState(() => _showPlayer = true);
+    _playerOverlay.open();
+    _playerAnimCtrl.forward();
+  }
+
+  void _closePlayer() {
+    _playerAnimCtrl.reverse().then((_) {
+      if (mounted) {
+        setState(() => _showPlayer = false);
+        _playerOverlay.setShowPlayer(false);
+      }
+    });
+  }
+
+  /// 从播放页跳转歌手页：关闭播放页叠加层 → push 歌手页到当前 tab Navigator。
   ///
   /// 若当前 tab 栈顶已是歌手页面，用 pushReplacement 替换，保证栈里最多只有一个歌手页。
   void _navigateToArtistFromPlayer(int id, String name) {
-    final rootNav = Navigator.of(context);
-    if (rootNav.canPop()) rootNav.pop();
+    if (_showPlayer) _closePlayer();
 
     final tabNav = _tabNavKeys[_currentIndex].currentState;
     if (tabNav == null) return;
@@ -329,8 +360,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   }
 
   void _navigateToAlbumFromPlayer(int id, String name) {
-    final rootNav = Navigator.of(context);
-    if (rootNav.canPop()) rootNav.pop();
+    if (_showPlayer) _closePlayer();
 
     final tabNav = _tabNavKeys[_currentIndex].currentState;
     if (tabNav == null) return;
@@ -365,14 +395,16 @@ class _MainScaffoldState extends State<MainScaffold> {
             hasSong: hasSong,
             keyboardOpen: keyboardOpen,
           );
-    return Provider<double?>.value(
-      value: clearance,
-      child: Stack(
-        children: [
-          if (isCompact)
-            _buildCompact(context)
-          else
-            _buildExtended(context, blur: blur),
+    return ChangeNotifierProvider<PlayerOverlayState>.value(
+      value: _playerOverlay,
+      child: Provider<double?>.value(
+        value: clearance,
+        child: Stack(
+          children: [
+            if (isCompact)
+              _buildCompact(context)
+            else
+              _buildExtended(context, blur: blur),
           // 浮动导航 + 小播放器放在 Scaffold 外层 Stack，固定在屏幕底部，
           // 完全与键盘无联动（键盘弹出时两者都不上浮，由 Scaffold body 内的
           // 页面内容自行调整）。
@@ -389,12 +421,26 @@ class _MainScaffoldState extends State<MainScaffold> {
                 padding: EdgeInsets.only(
                   bottom: WindowUtils.floatingNavHeight(context) + mq.padding.bottom,
                 ),
-                child: const MiniPlayer(),
+                child: MiniPlayer(onOpenPlayer: _openPlayer),
               ),
             ),
           ],
+          // 全屏播放页叠加层（从底部滑入，覆盖所有内容）。
+          if (_showPlayer)
+            SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 1),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(
+                parent: _playerAnimCtrl,
+                curve: Curves.easeOutCubic,
+                reverseCurve: Curves.easeInCubic,
+              )),
+              child: PlayerPage(onClose: _closePlayer),
+            ),
           const _ToastOverlay(),
         ],
+      ),
       ),
     );
   }
@@ -540,7 +586,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                       ),
                       Align(
                         alignment: Alignment.bottomCenter,
-                        child: const MiniPlayer(),
+                        child: MiniPlayer(onOpenPlayer: _openPlayer),
                       ),
                     ],
                   ),
